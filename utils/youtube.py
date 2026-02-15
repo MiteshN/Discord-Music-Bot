@@ -53,15 +53,13 @@ class YTDLSource(discord.PCMVolumeTransformer):
         before_options = FFMPEG_OPTIONS["before_options"]
         if seek_to > 0:
             before_options = f"-ss {seek_to} {before_options}"
-
-        options = FFMPEG_OPTIONS["options"]
         if end_at > 0:
-            options = f"{options} -to {end_at}"
+            before_options = f"{before_options} -to {end_at}"
 
         source = discord.FFmpegPCMAudio(
             data["url"],
             before_options=before_options,
-            options=options,
+            options=FFMPEG_OPTIONS["options"],
         )
         return cls(source, data=data, volume=volume)
 

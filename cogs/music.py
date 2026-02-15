@@ -79,7 +79,7 @@ class Music(commands.Cog):
     def _apply_sponsorblock(song: Song, segments: list[tuple[float, float]]):
         """Trim intro/outro non-music segments by adjusting song offset and duration.
 
-        Like muse bot: only trims segments at the very start (intro) and very end (outro).
+        Only trims segments at the very start (intro) and very end (outro).
         """
         if not segments:
             return
@@ -87,18 +87,13 @@ class Music(commands.Cog):
         intro = segments[0]
         outro = segments[-1]
 
-        # Trim outro: if last segment ends within 2s of song end
-        if outro[1] >= song.duration - 2:
-            song.duration -= int(outro[1] - outro[0])
+        # Trim outro: if last segment ends within 10s of song end
+        if outro[1] >= song.duration - 10:
             song.sb_end = int(outro[0])
 
-        # Trim intro: if first segment starts within 2s of beginning
-        if intro[0] <= 2:
+        # Trim intro: if first segment starts within 15s of beginning
+        if intro[0] <= 15:
             song.sb_offset = int(intro[1])
-            song.duration -= song.sb_offset
-            # Adjust sb_end if both intro and outro were trimmed
-            if not song.sb_end:
-                song.sb_end = 0
 
     async def _play_song(self, ctx: commands.Context, song: Song):
         gq = self.queue_manager.get(ctx.guild.id)

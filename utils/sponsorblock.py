@@ -21,10 +21,11 @@ async def get_segments(video_id: str) -> list[tuple[float, float]]:
                 for entry in data:
                     if entry.get("videoID") != video_id:
                         continue
+                    categories = {"music_offtopic", "sponsor", "selfpromo", "intro", "outro"}
                     segments = [
                         (seg["segment"][0], seg["segment"][1])
                         for seg in entry.get("segments", [])
-                        if seg.get("category") == "music_offtopic"
+                        if seg.get("category") in categories
                     ]
                     segments.sort(key=lambda s: s[0])
                     # Merge overlapping segments
