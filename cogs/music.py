@@ -102,24 +102,29 @@ class Music(commands.Cog):
             if not ctx.voice_client or not ctx.voice_client.is_playing():
                 return
 
+            gq.sb_seeking = True
             ctx.voice_client.stop()
-            source = await YTDLSource.create_source(
-                song.url or song.search_query,
-                loop=self.bot.loop,
-                volume=gq.volume,
-                seek_to=int(seek_to),
-            )
-            gq.start_time = time.time() - seek_to
+            try:
+                source = await YTDLSource.create_source(
+                    song.url or song.search_query,
+                    loop=self.bot.loop,
+                    volume=gq.volume,
+                    seek_to=int(seek_to),
+                )
+                gq.start_time = time.time() - seek_to
 
-            def after_play(error):
-                if error:
-                    print(f"Playback error: {error}")
-                asyncio.run_coroutine_threadsafe(self._play_next_async(ctx), self.bot.loop)
+                def after_play(error):
+                    if error:
+                        print(f"Playback error: {error}")
+                    asyncio.run_coroutine_threadsafe(self._play_next_async(ctx), self.bot.loop)
 
-            ctx.voice_client.play(source, after=after_play)
+                ctx.voice_client.play(source, after=after_play)
+            finally:
+                gq.sb_seeking = False
         except asyncio.CancelledError:
-            pass
+            gq.sb_seeking = False
         except Exception as e:
+            gq.sb_seeking = False
             print(f"SponsorBlock skip error: {e}")
 
     async def _play_song(self, ctx: commands.Context, song: Song):
@@ -176,6 +181,8 @@ class Music(commands.Cog):
 
     async def _play_next_async(self, ctx: commands.Context):
         gq = self.queue_manager.get(ctx.guild.id)
+        if gq.sb_seeking:
+            return
         gq.cancel_skip_tasks()
         next_song = gq.next()
         if next_song:

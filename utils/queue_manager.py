@@ -33,6 +33,7 @@ class GuildQueue:
     skip_votes: set = field(default_factory=set)
     sponsorblock: bool = True
     skip_tasks: list[asyncio.Task] = field(default_factory=list)
+    sb_seeking: bool = False
 
     def cancel_skip_tasks(self):
         for task in self.skip_tasks:
