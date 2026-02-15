@@ -56,7 +56,9 @@ class Music(commands.Cog):
             if ctx.voice_client.channel != channel:
                 await ctx.voice_client.move_to(channel)
             return ctx.voice_client
-        return await channel.connect()
+        vc = await channel.connect()
+        await ctx.guild.change_voice_state(channel=channel, self_deaf=True)
+        return vc
 
     def _check_dj(self, ctx: commands.Context) -> bool:
         dj_role = discord.utils.get(ctx.guild.roles, name="DJ")
