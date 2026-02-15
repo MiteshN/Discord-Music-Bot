@@ -14,7 +14,6 @@ A feature-rich Discord music bot built with Python that supports YouTube, Spotif
 - **Now playing** — Track info with a live progress bar
 - **DJ role** — Restrict destructive commands to users with a "DJ" role
 - **Vote skip** — Majority vote required to skip when 3+ users are in the channel
-- **SponsorBlock** — Auto-skips non-music segments (intros, outros, sponsors) using SponsorBlock
 - **Auto-disconnect** — Leaves the voice channel after 3 minutes of inactivity
 - **Slash commands** — All commands work as both `!prefix` and `/slash` commands
 
@@ -37,7 +36,6 @@ A feature-rich Discord music bot built with Python that supports YouTube, Spotif
 | `!remove <position>` | Remove a song from the queue |
 | `!search <query>` | Search YouTube and pick a result |
 | `!lyrics` | Show lyrics for the current track |
-| `!sponsorblock` | Toggle SponsorBlock auto-skip on/off (alias: `!sb`) |
 
 ## Setup
 
@@ -122,10 +120,6 @@ docker compose logs -f           # view logs
 docker compose down              # stop the bot
 docker compose up -d --build     # rebuild after code changes
 ```
-
-## SponsorBlock
-
-SponsorBlock is enabled by default and automatically skips non-music segments (sponsors, intros, outros) in YouTube videos using community-submitted data from [SponsorBlock](https://sponsor.ajay.app/). Toggle it per server with `!sponsorblock` or `!sb`.
 
 ## DJ Role
 

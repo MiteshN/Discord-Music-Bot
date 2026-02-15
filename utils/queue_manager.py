@@ -19,8 +19,6 @@ class Song:
     requester: str
     duration: int = 0
     thumbnail: str = ""
-    sb_offset: int = 0
-    sb_end: int = 0
 
 
 @dataclass
@@ -31,7 +29,6 @@ class GuildQueue:
     loop_mode: LoopMode = LoopMode.OFF
     start_time: float = 0.0
     skip_votes: set = field(default_factory=set)
-    sponsorblock: bool = True
 
     def add(self, song: Song):
         self.queue.append(song)

@@ -42,7 +42,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
         self.thumbnail = data.get("thumbnail", "")
 
     @classmethod
-    async def create_source(cls, search: str, *, loop: asyncio.AbstractEventLoop = None, volume: float = 0.5, seek_to: int = 0, end_at: int = 0):
+    async def create_source(cls, search: str, *, loop: asyncio.AbstractEventLoop = None, volume: float = 0.5, seek_to: int = 0):
         loop = loop or asyncio.get_event_loop()
         partial = functools.partial(ytdl.extract_info, search, download=False)
         data = await loop.run_in_executor(None, partial)
@@ -53,8 +53,6 @@ class YTDLSource(discord.PCMVolumeTransformer):
         before_options = FFMPEG_OPTIONS["before_options"]
         if seek_to > 0:
             before_options = f"-ss {seek_to} {before_options}"
-        if end_at > 0:
-            before_options = f"{before_options} -to {end_at}"
 
         source = discord.FFmpegPCMAudio(
             data["url"],

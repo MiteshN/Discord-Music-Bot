@@ -10,10 +10,8 @@ from utils.queue_manager import QueueManager, Song, LoopMode
 from utils.youtube import YTDLSource
 from utils.spotify import SpotifyResolver
 from utils.lyrics import LyricsFetcher
-from utils.sponsorblock import get_segments
 
 YOUTUBE_PLAYLIST_RE = re.compile(r"(youtube\.com/.*[?&]list=|youtu\.be/.*[?&]list=)")
-YOUTUBE_VIDEO_ID_RE = re.compile(r"(?:v=|youtu\.be/|/shorts/)([a-zA-Z0-9_-]{11})")
 
 
 def format_duration(seconds: int) -> str:
@@ -70,31 +68,6 @@ class Music(commands.Cog):
             return True
         return dj_role in ctx.author.roles
 
-    @staticmethod
-    def _extract_video_id(url: str) -> str | None:
-        match = YOUTUBE_VIDEO_ID_RE.search(url)
-        return match.group(1) if match else None
-
-    @staticmethod
-    def _apply_sponsorblock(song: Song, segments: list[tuple[float, float]]):
-        """Trim intro/outro non-music segments by adjusting song offset and duration.
-
-        Only trims segments at the very start (intro) and very end (outro).
-        """
-        if not segments:
-            return
-
-        intro = segments[0]
-        outro = segments[-1]
-
-        # Trim outro: if last segment ends within 10s of song end
-        if outro[1] >= song.duration - 10:
-            song.sb_end = int(outro[0])
-
-        # Trim intro: if first segment starts within 15s of beginning
-        if intro[0] <= 15:
-            song.sb_offset = int(intro[1])
-
     async def _play_song(self, ctx: commands.Context, song: Song):
         gq = self.queue_manager.get(ctx.guild.id)
         gq.current = song
@@ -115,39 +88,6 @@ class Music(commands.Cog):
         song.duration = source.duration
         song.thumbnail = source.thumbnail
         song.url = source.webpage_url
-
-        # SponsorBlock: fetch segments and compute intro/outro trim
-        sb_trimmed = False
-        if gq.sponsorblock and song.duration > 0:
-            video_id = self._extract_video_id(song.url)
-            if video_id:
-                segments = await get_segments(video_id)
-                if segments:
-                    self._apply_sponsorblock(song, segments)
-                    sb_trimmed = song.sb_offset > 0 or song.sb_end > 0
-
-        if sb_trimmed:
-            print(f"[SponsorBlock] Trimming: offset={song.sb_offset}s, end={song.sb_end}s")
-
-        # If SponsorBlock trimmed, recreate source with offset/end
-        if sb_trimmed:
-            try:
-                source = await YTDLSource.create_source(
-                    song.url or song.search_query,
-                    loop=self.bot.loop,
-                    volume=gq.volume,
-                    seek_to=song.sb_offset,
-                    end_at=song.sb_end if song.sb_end else 0,
-                )
-            except Exception:
-                # Fall back to untrimmed playback
-                sb_trimmed = False
-                source = await YTDLSource.create_source(
-                    song.url or song.search_query,
-                    loop=self.bot.loop,
-                    volume=gq.volume,
-                )
-
         gq.start_time = time.time()
 
         def after_play(error):
@@ -166,8 +106,6 @@ class Music(commands.Cog):
         embed.add_field(name="Requested by", value=song.requester)
         if song.thumbnail:
             embed.set_thumbnail(url=song.thumbnail)
-        if sb_trimmed:
-            embed.set_footer(text="SponsorBlock: non-music intro/outro trimmed")
         await ctx.send(embed=embed)
 
     async def _play_next_async(self, ctx: commands.Context):
@@ -509,6 +447,7 @@ class Music(commands.Cog):
 
         gq.start_time = time.time() - seconds
 
+        # Prevent after callback from advancing queue
         def after_play(error):
             if error:
                 print(f"Playback error: {error}")
@@ -605,13 +544,6 @@ class Music(commands.Cog):
                 color=discord.Color.purple(),
             )
             await ctx.send(embed=embed)
-
-    @commands.hybrid_command(name="sponsorblock", aliases=["sb"], description="Toggle SponsorBlock auto-skip on/off")
-    async def sponsorblock(self, ctx: commands.Context):
-        gq = self.queue_manager.get(ctx.guild.id)
-        gq.sponsorblock = not gq.sponsorblock
-        state = "enabled" if gq.sponsorblock else "disabled"
-        await ctx.send(f"SponsorBlock is now **{state}**.")
 
 
 async def setup(bot: commands.Bot):
