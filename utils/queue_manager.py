@@ -1,3 +1,4 @@
+import asyncio
 import random
 import time
 from dataclasses import dataclass, field
@@ -19,6 +20,7 @@ class Song:
     requester: str
     duration: int = 0
     thumbnail: str = ""
+    segments: list[tuple[float, float]] = field(default_factory=list)
 
 
 @dataclass
@@ -29,6 +31,13 @@ class GuildQueue:
     loop_mode: LoopMode = LoopMode.OFF
     start_time: float = 0.0
     skip_votes: set = field(default_factory=set)
+    sponsorblock: bool = True
+    skip_tasks: list[asyncio.Task] = field(default_factory=list)
+
+    def cancel_skip_tasks(self):
+        for task in self.skip_tasks:
+            task.cancel()
+        self.skip_tasks.clear()
 
     def add(self, song: Song):
         self.queue.append(song)
@@ -54,6 +63,7 @@ class GuildQueue:
         random.shuffle(self.queue)
 
     def clear(self):
+        self.cancel_skip_tasks()
         self.queue.clear()
         self.current = None
         self.skip_votes.clear()

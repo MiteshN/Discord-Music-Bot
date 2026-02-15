@@ -10,8 +10,10 @@ from utils.queue_manager import QueueManager, Song, LoopMode
 from utils.youtube import YTDLSource
 from utils.spotify import SpotifyResolver
 from utils.lyrics import LyricsFetcher
+from utils.sponsorblock import get_segments
 
 YOUTUBE_PLAYLIST_RE = re.compile(r"(youtube\.com/.*[?&]list=|youtu\.be/.*[?&]list=)")
+YOUTUBE_VIDEO_ID_RE = re.compile(r"(?:v=|youtu\.be/|/shorts/)([a-zA-Z0-9_-]{11})")
 
 
 def format_duration(seconds: int) -> str:
@@ -68,6 +70,58 @@ class Music(commands.Cog):
             return True
         return dj_role in ctx.author.roles
 
+    @staticmethod
+    def _extract_video_id(url: str) -> str | None:
+        match = YOUTUBE_VIDEO_ID_RE.search(url)
+        return match.group(1) if match else None
+
+    def _schedule_skips(self, ctx: commands.Context, gq, segments: list[tuple[float, float]], offset: float = 0.0):
+        """Schedule async tasks to auto-skip SponsorBlock segments."""
+        gq.cancel_skip_tasks()
+        song = gq.current
+        for start, end in segments:
+            delay = start - offset
+            if delay < 0:
+                # Segment already started — check if we're inside it
+                if offset < end:
+                    delay = 0
+                else:
+                    continue  # Already past this segment
+
+            task = asyncio.create_task(self._skip_segment(ctx, gq, song, delay, end))
+            gq.skip_tasks.append(task)
+
+    async def _skip_segment(self, ctx: commands.Context, gq, song, delay: float, seek_to: float):
+        """Wait for delay then seek past a segment if still playing the same song."""
+        try:
+            if delay > 0:
+                await asyncio.sleep(delay)
+            # Verify still playing the same song
+            if gq.current is not song:
+                return
+            if not ctx.voice_client or not ctx.voice_client.is_playing():
+                return
+
+            ctx.voice_client.stop()
+            source = await YTDLSource.create_source(
+                song.url or song.search_query,
+                loop=self.bot.loop,
+                volume=gq.volume,
+                seek_to=int(seek_to),
+            )
+            gq.start_time = time.time() - seek_to
+
+            def after_play(error):
+                if error:
+                    print(f"Playback error: {error}")
+                asyncio.run_coroutine_threadsafe(self._play_next_async(ctx), self.bot.loop)
+
+            ctx.voice_client.play(source, after=after_play)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            print(f"SponsorBlock skip error: {e}")
+
     async def _play_song(self, ctx: commands.Context, song: Song):
         gq = self.queue_manager.get(ctx.guild.id)
         gq.current = song
@@ -89,6 +143,7 @@ class Music(commands.Cog):
         song.thumbnail = source.thumbnail
         song.url = source.webpage_url
         gq.start_time = time.time()
+        gq.cancel_skip_tasks()
 
         def after_play(error):
             if error:
@@ -96,6 +151,15 @@ class Music(commands.Cog):
             asyncio.run_coroutine_threadsafe(self._play_next_async(ctx), self.bot.loop)
 
         ctx.voice_client.play(source, after=after_play)
+
+        # SponsorBlock: fetch segments and schedule skips
+        if gq.sponsorblock:
+            video_id = self._extract_video_id(song.url)
+            if video_id:
+                segments = await get_segments(video_id)
+                if segments:
+                    song.segments = segments
+                    self._schedule_skips(ctx, gq, segments)
 
         embed = discord.Embed(
             title="Now Playing",
@@ -106,10 +170,13 @@ class Music(commands.Cog):
         embed.add_field(name="Requested by", value=song.requester)
         if song.thumbnail:
             embed.set_thumbnail(url=song.thumbnail)
+        if song.segments:
+            embed.set_footer(text=f"SponsorBlock: {len(song.segments)} segment(s) will be skipped")
         await ctx.send(embed=embed)
 
     async def _play_next_async(self, ctx: commands.Context):
         gq = self.queue_manager.get(ctx.guild.id)
+        gq.cancel_skip_tasks()
         next_song = gq.next()
         if next_song:
             await self._play_song(ctx, next_song)
@@ -268,6 +335,8 @@ class Music(commands.Cog):
 
         should_skip, votes, needed = self._vote_skip_check(ctx)
         if should_skip:
+            gq = self.queue_manager.get(ctx.guild.id)
+            gq.cancel_skip_tasks()
             ctx.voice_client.stop()
             await ctx.send("Skipped.")
         else:
@@ -307,7 +376,7 @@ class Music(commands.Cog):
             await ctx.send("I'm not in a voice channel.")
             return
         gq = self.queue_manager.get(ctx.guild.id)
-        gq.clear()
+        gq.clear()  # also cancels skip tasks
         ctx.voice_client.stop()
         await ctx.voice_client.disconnect()
         await ctx.send("Disconnected.")
@@ -433,6 +502,7 @@ class Music(commands.Cog):
             await ctx.send("Timestamp exceeds track duration.")
             return
 
+        gq.cancel_skip_tasks()
         ctx.voice_client.stop()
         try:
             source = await YTDLSource.create_source(
@@ -447,7 +517,10 @@ class Music(commands.Cog):
 
         gq.start_time = time.time() - seconds
 
-        # Prevent after callback from advancing queue
+        # Reschedule SponsorBlock skips from new position
+        if gq.sponsorblock and gq.current.segments:
+            self._schedule_skips(ctx, gq, gq.current.segments, offset=float(seconds))
+
         def after_play(error):
             if error:
                 print(f"Playback error: {error}")
@@ -544,6 +617,16 @@ class Music(commands.Cog):
                 color=discord.Color.purple(),
             )
             await ctx.send(embed=embed)
+
+
+    @commands.hybrid_command(name="sponsorblock", aliases=["sb"], description="Toggle SponsorBlock auto-skip on/off")
+    async def sponsorblock(self, ctx: commands.Context):
+        gq = self.queue_manager.get(ctx.guild.id)
+        gq.sponsorblock = not gq.sponsorblock
+        state = "enabled" if gq.sponsorblock else "disabled"
+        if not gq.sponsorblock:
+            gq.cancel_skip_tasks()
+        await ctx.send(f"SponsorBlock is now **{state}**.")
 
 
 async def setup(bot: commands.Bot):
