@@ -126,6 +126,9 @@ class Music(commands.Cog):
                     self._apply_sponsorblock(song, segments)
                     sb_trimmed = song.sb_offset > 0 or song.sb_end > 0
 
+        if sb_trimmed:
+            print(f"[SponsorBlock] Trimming: offset={song.sb_offset}s, end={song.sb_end}s")
+
         # If SponsorBlock trimmed, recreate source with offset/end
         if sb_trimmed:
             try:

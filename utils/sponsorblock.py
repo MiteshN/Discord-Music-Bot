@@ -4,7 +4,7 @@ import aiohttp
 
 
 async def get_segments(video_id: str) -> list[tuple[float, float]]:
-    """Fetch SponsorBlock music_offtopic segments for a YouTube video.
+    """Fetch SponsorBlock skip segments for a YouTube video.
 
     Uses the hash-based endpoint (privacy-friendly, more reliable).
     Returns a sorted list of merged (start, end) tuples.
@@ -12,16 +12,16 @@ async def get_segments(video_id: str) -> list[tuple[float, float]]:
     """
     hash_prefix = hashlib.sha256(video_id.encode()).hexdigest()[:4]
     url = f"https://sponsor.ajay.app/api/skipSegments/{hash_prefix}"
+    categories = {"music_offtopic", "sponsor", "selfpromo", "intro", "outro"}
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 if resp.status != 200:
                     return []
                 data = await resp.json()
                 for entry in data:
                     if entry.get("videoID") != video_id:
                         continue
-                    categories = {"music_offtopic", "sponsor", "selfpromo", "intro", "outro"}
                     segments = [
                         (seg["segment"][0], seg["segment"][1])
                         for seg in entry.get("segments", [])
@@ -35,7 +35,10 @@ async def get_segments(video_id: str) -> list[tuple[float, float]]:
                             merged[-1] = (merged[-1][0], end)
                         else:
                             merged.append((start, end))
+                    if merged:
+                        print(f"[SponsorBlock] {video_id}: found {len(merged)} segment(s): {merged}")
                     return merged
                 return []
-    except Exception:
+    except Exception as e:
+        print(f"[SponsorBlock] {video_id}: API error: {e}")
         return []
