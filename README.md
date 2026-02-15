@@ -103,7 +103,7 @@ python bot.py
 ```yaml
 services:
   bot:
-    build: .
+    image: ghcr.io/miteshn/discord-music-bot:latest
     restart: always
     environment:
       - DISCORD_BOT_TOKEN=
