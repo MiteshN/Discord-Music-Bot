@@ -1,0 +1,9 @@
+services:
+  bot:
+    build: .
+    restart: always
+    environment:
+      - DISCORD_BOT_TOKEN=
+      - SPOTIFY_CLIENT_ID=
+      - SPOTIFY_CLIENT_SECRET=
+      - GENIUS_API_TOKEN=

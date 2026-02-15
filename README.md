@@ -26,6 +26,7 @@ A feature-rich Discord music bot built with Python that supports YouTube, Spotif
 | `!pause` | Pause playback |
 | `!resume` | Resume playback |
 | `!stop` | Clear the queue and disconnect |
+| `!disconnect` | Disconnect from the voice channel (aliases: `!dc`, `!leave`) |
 | `!queue` | Show the current queue |
 | `!volume <0-100>` | Adjust the volume |
 | `!nowplaying` | Show current track with progress bar |
@@ -93,6 +94,31 @@ cp .env.example .env
 ```bash
 source .venv/bin/activate
 python bot.py
+```
+
+### Docker
+
+**Docker Compose:**
+
+```yaml
+services:
+  bot:
+    build: .
+    restart: always
+    environment:
+      - DISCORD_BOT_TOKEN=
+      - SPOTIFY_CLIENT_ID=
+      - SPOTIFY_CLIENT_SECRET=
+      - GENIUS_API_TOKEN=
+```
+
+Fill in your tokens after the `=` signs, then:
+
+```bash
+docker compose up -d             # start in background
+docker compose logs -f           # view logs
+docker compose down              # stop the bot
+docker compose up -d --build     # rebuild after code changes
 ```
 
 ## DJ Role
