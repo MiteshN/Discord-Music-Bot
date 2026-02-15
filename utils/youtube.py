@@ -4,7 +4,7 @@ import discord
 import yt_dlp
 
 YTDL_OPTIONS = {
-    "format": "bestaudio/best",
+    "format": "bestaudio[acodec=opus]/bestaudio/best",
     "noplaylist": True,
     "nocheckcertificate": True,
     "ignoreerrors": False,
@@ -23,8 +23,8 @@ YTDL_PLAYLIST_OPTIONS = {
 }
 
 FFMPEG_OPTIONS = {
-    "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-    "options": "-vn",
+    "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 200000",
+    "options": "-vn -bufsize 512k",
 }
 
 ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)

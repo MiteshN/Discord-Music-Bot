@@ -1,7 +1,9 @@
 import asyncio
 import time
 import re
+import aiohttp
 import discord
+from discord import app_commands
 from discord.ext import commands, tasks
 
 from utils.queue_manager import QueueManager, Song, LoopMode
@@ -144,7 +146,58 @@ class Music(commands.Cog):
 
     # --- Commands ---
 
+    async def _youtube_suggestions(self, query: str) -> list[str]:
+        url = "https://suggestqueries.google.com/complete/search"
+        params = {"client": "firefox", "ds": "yt", "q": query}
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=2)) as resp:
+                data = await resp.json(content_type=None)
+                return data[1] if len(data) > 1 else []
+
+    async def _spotify_suggestions(self, query: str, limit: int = 5) -> list[app_commands.Choice[str]]:
+        if not self.spotify.sp:
+            return []
+        loop = asyncio.get_event_loop()
+        results = await loop.run_in_executor(
+            None, lambda: self.spotify.sp.search(query, type="track,album", limit=limit)
+        )
+        choices = []
+        for track in (results.get("tracks", {}).get("items", []))[:limit]:
+            artist = track["artists"][0]["name"] if track["artists"] else ""
+            name = f"Spotify: {track['name']} - {artist}"
+            choices.append(app_commands.Choice(name=name[:100], value=f"https://open.spotify.com/track/{track['id']}"))
+        for album in (results.get("albums", {}).get("items", []))[:limit // 2]:
+            artist = album["artists"][0]["name"] if album["artists"] else ""
+            name = f"Spotify: {album['name']} - {artist}"
+            choices.append(app_commands.Choice(name=name[:100], value=f"https://open.spotify.com/album/{album['id']}"))
+        return choices
+
+    async def play_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        if len(current) < 2:
+            return []
+        try:
+            yt_task = self._youtube_suggestions(current)
+            sp_task = self._spotify_suggestions(current, limit=5)
+            yt_results, sp_results = await asyncio.gather(yt_task, sp_task, return_exceptions=True)
+
+            choices: list[app_commands.Choice[str]] = []
+
+            # YouTube suggestions
+            if isinstance(yt_results, list):
+                max_yt = 10 - (len(sp_results) if isinstance(sp_results, list) else 0)
+                for s in yt_results[:max_yt]:
+                    choices.append(app_commands.Choice(name=f"YouTube: {s}"[:100], value=s))
+
+            # Spotify suggestions
+            if isinstance(sp_results, list):
+                choices.extend(sp_results)
+
+            return choices[:10]
+        except Exception:
+            return []
+
     @commands.hybrid_command(name="play", description="Play a song from YouTube, Spotify, SoundCloud, or search")
+    @app_commands.autocomplete(query=play_autocomplete)
     async def play(self, ctx: commands.Context, *, query: str):
         vc = await self._ensure_voice(ctx)
         if not vc:
@@ -245,6 +298,17 @@ class Music(commands.Cog):
             ctx.voice_client.stop()
             await ctx.voice_client.disconnect()
         await ctx.send("Stopped and disconnected.")
+
+    @commands.hybrid_command(name="disconnect", aliases=["dc", "leave"], description="Disconnect from the voice channel")
+    async def disconnect(self, ctx: commands.Context):
+        if not ctx.voice_client:
+            await ctx.send("I'm not in a voice channel.")
+            return
+        gq = self.queue_manager.get(ctx.guild.id)
+        gq.clear()
+        ctx.voice_client.stop()
+        await ctx.voice_client.disconnect()
+        await ctx.send("Disconnected.")
 
     @commands.hybrid_command(name="queue", description="Show the current queue")
     async def queue(self, ctx: commands.Context):
