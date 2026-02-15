@@ -75,57 +75,30 @@ class Music(commands.Cog):
         match = YOUTUBE_VIDEO_ID_RE.search(url)
         return match.group(1) if match else None
 
-    def _schedule_skips(self, ctx: commands.Context, gq, segments: list[tuple[float, float]], offset: float = 0.0):
-        """Schedule async tasks to auto-skip SponsorBlock segments."""
-        gq.cancel_skip_tasks()
-        song = gq.current
-        for start, end in segments:
-            delay = start - offset
-            if delay < 0:
-                # Segment already started — check if we're inside it
-                if offset < end:
-                    delay = 0
-                else:
-                    continue  # Already past this segment
+    @staticmethod
+    def _apply_sponsorblock(song: Song, segments: list[tuple[float, float]]):
+        """Trim intro/outro non-music segments by adjusting song offset and duration.
 
-            task = asyncio.create_task(self._skip_segment(ctx, gq, song, delay, end))
-            gq.skip_tasks.append(task)
+        Like muse bot: only trims segments at the very start (intro) and very end (outro).
+        """
+        if not segments:
+            return
 
-    async def _skip_segment(self, ctx: commands.Context, gq, song, delay: float, seek_to: float):
-        """Wait for delay then seek past a segment if still playing the same song."""
-        try:
-            if delay > 0:
-                await asyncio.sleep(delay)
-            # Verify still playing the same song
-            if gq.current is not song:
-                return
-            if not ctx.voice_client or not ctx.voice_client.is_playing():
-                return
+        intro = segments[0]
+        outro = segments[-1]
 
-            gq.sb_seeking = True
-            ctx.voice_client.stop()
-            try:
-                source = await YTDLSource.create_source(
-                    song.url or song.search_query,
-                    loop=self.bot.loop,
-                    volume=gq.volume,
-                    seek_to=int(seek_to),
-                )
-                gq.start_time = time.time() - seek_to
+        # Trim outro: if last segment ends within 2s of song end
+        if outro[1] >= song.duration - 2:
+            song.duration -= int(outro[1] - outro[0])
+            song.sb_end = int(outro[0])
 
-                def after_play(error):
-                    if error:
-                        print(f"Playback error: {error}")
-                    asyncio.run_coroutine_threadsafe(self._play_next_async(ctx), self.bot.loop)
-
-                ctx.voice_client.play(source, after=after_play)
-            finally:
-                gq.sb_seeking = False
-        except asyncio.CancelledError:
-            gq.sb_seeking = False
-        except Exception as e:
-            gq.sb_seeking = False
-            print(f"SponsorBlock skip error: {e}")
+        # Trim intro: if first segment starts within 2s of beginning
+        if intro[0] <= 2:
+            song.sb_offset = int(intro[1])
+            song.duration -= song.sb_offset
+            # Adjust sb_end if both intro and outro were trimmed
+            if not song.sb_end:
+                song.sb_end = 0
 
     async def _play_song(self, ctx: commands.Context, song: Song):
         gq = self.queue_manager.get(ctx.guild.id)
@@ -147,8 +120,37 @@ class Music(commands.Cog):
         song.duration = source.duration
         song.thumbnail = source.thumbnail
         song.url = source.webpage_url
+
+        # SponsorBlock: fetch segments and compute intro/outro trim
+        sb_trimmed = False
+        if gq.sponsorblock and song.duration > 0:
+            video_id = self._extract_video_id(song.url)
+            if video_id:
+                segments = await get_segments(video_id)
+                if segments:
+                    self._apply_sponsorblock(song, segments)
+                    sb_trimmed = song.sb_offset > 0 or song.sb_end > 0
+
+        # If SponsorBlock trimmed, recreate source with offset/end
+        if sb_trimmed:
+            try:
+                source = await YTDLSource.create_source(
+                    song.url or song.search_query,
+                    loop=self.bot.loop,
+                    volume=gq.volume,
+                    seek_to=song.sb_offset,
+                    end_at=song.sb_end if song.sb_end else 0,
+                )
+            except Exception:
+                # Fall back to untrimmed playback
+                sb_trimmed = False
+                source = await YTDLSource.create_source(
+                    song.url or song.search_query,
+                    loop=self.bot.loop,
+                    volume=gq.volume,
+                )
+
         gq.start_time = time.time()
-        gq.cancel_skip_tasks()
 
         def after_play(error):
             if error:
@@ -156,15 +158,6 @@ class Music(commands.Cog):
             asyncio.run_coroutine_threadsafe(self._play_next_async(ctx), self.bot.loop)
 
         ctx.voice_client.play(source, after=after_play)
-
-        # SponsorBlock: fetch segments and schedule skips
-        if gq.sponsorblock:
-            video_id = self._extract_video_id(song.url)
-            if video_id:
-                segments = await get_segments(video_id)
-                if segments:
-                    song.segments = segments
-                    self._schedule_skips(ctx, gq, segments)
 
         embed = discord.Embed(
             title="Now Playing",
@@ -175,15 +168,12 @@ class Music(commands.Cog):
         embed.add_field(name="Requested by", value=song.requester)
         if song.thumbnail:
             embed.set_thumbnail(url=song.thumbnail)
-        if song.segments:
-            embed.set_footer(text=f"SponsorBlock: {len(song.segments)} segment(s) will be skipped")
+        if sb_trimmed:
+            embed.set_footer(text="SponsorBlock: non-music intro/outro trimmed")
         await ctx.send(embed=embed)
 
     async def _play_next_async(self, ctx: commands.Context):
         gq = self.queue_manager.get(ctx.guild.id)
-        if gq.sb_seeking:
-            return
-        gq.cancel_skip_tasks()
         next_song = gq.next()
         if next_song:
             await self._play_song(ctx, next_song)
@@ -342,8 +332,6 @@ class Music(commands.Cog):
 
         should_skip, votes, needed = self._vote_skip_check(ctx)
         if should_skip:
-            gq = self.queue_manager.get(ctx.guild.id)
-            gq.cancel_skip_tasks()
             ctx.voice_client.stop()
             await ctx.send("Skipped.")
         else:
@@ -383,7 +371,7 @@ class Music(commands.Cog):
             await ctx.send("I'm not in a voice channel.")
             return
         gq = self.queue_manager.get(ctx.guild.id)
-        gq.clear()  # also cancels skip tasks
+        gq.clear()
         ctx.voice_client.stop()
         await ctx.voice_client.disconnect()
         await ctx.send("Disconnected.")
@@ -509,7 +497,6 @@ class Music(commands.Cog):
             await ctx.send("Timestamp exceeds track duration.")
             return
 
-        gq.cancel_skip_tasks()
         ctx.voice_client.stop()
         try:
             source = await YTDLSource.create_source(
@@ -523,10 +510,6 @@ class Music(commands.Cog):
             return
 
         gq.start_time = time.time() - seconds
-
-        # Reschedule SponsorBlock skips from new position
-        if gq.sponsorblock and gq.current.segments:
-            self._schedule_skips(ctx, gq, gq.current.segments, offset=float(seconds))
 
         def after_play(error):
             if error:
@@ -625,14 +608,11 @@ class Music(commands.Cog):
             )
             await ctx.send(embed=embed)
 
-
     @commands.hybrid_command(name="sponsorblock", aliases=["sb"], description="Toggle SponsorBlock auto-skip on/off")
     async def sponsorblock(self, ctx: commands.Context):
         gq = self.queue_manager.get(ctx.guild.id)
         gq.sponsorblock = not gq.sponsorblock
         state = "enabled" if gq.sponsorblock else "disabled"
-        if not gq.sponsorblock:
-            gq.cancel_skip_tasks()
         await ctx.send(f"SponsorBlock is now **{state}**.")
 
 

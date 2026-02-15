@@ -2,14 +2,12 @@ import hashlib
 
 import aiohttp
 
-CATEGORIES = {"music_offtopic", "sponsor", "intro", "outro"}
-
 
 async def get_segments(video_id: str) -> list[tuple[float, float]]:
-    """Fetch SponsorBlock skip segments for a YouTube video.
+    """Fetch SponsorBlock music_offtopic segments for a YouTube video.
 
     Uses the hash-based endpoint (privacy-friendly, more reliable).
-    Returns a sorted list of (start, end) tuples for non-music segments.
+    Returns a sorted list of merged (start, end) tuples.
     Returns an empty list on any error.
     """
     hash_prefix = hashlib.sha256(video_id.encode()).hexdigest()[:4]
@@ -26,10 +24,17 @@ async def get_segments(video_id: str) -> list[tuple[float, float]]:
                     segments = [
                         (seg["segment"][0], seg["segment"][1])
                         for seg in entry.get("segments", [])
-                        if seg.get("category") in CATEGORIES
+                        if seg.get("category") == "music_offtopic"
                     ]
                     segments.sort(key=lambda s: s[0])
-                    return segments
+                    # Merge overlapping segments
+                    merged: list[tuple[float, float]] = []
+                    for start, end in segments:
+                        if merged and merged[-1][1] > start:
+                            merged[-1] = (merged[-1][0], end)
+                        else:
+                            merged.append((start, end))
+                    return merged
                 return []
     except Exception:
         return []
