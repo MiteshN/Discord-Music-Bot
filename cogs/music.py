@@ -10,6 +10,7 @@ from utils.queue_manager import QueueManager, Song, LoopMode
 from utils.youtube import YTDLSource
 from utils.spotify import SpotifyResolver
 from utils.lyrics import LyricsFetcher
+from utils.cache import CacheManager
 
 YOUTUBE_PLAYLIST_RE = re.compile(r"(youtube\.com/.*[?&]list=|youtu\.be/.*[?&]list=)")
 
@@ -176,10 +177,13 @@ class Music(commands.Cog):
         self.queue_manager = QueueManager()
         self.spotify = SpotifyResolver()
         self.lyrics_fetcher = LyricsFetcher()
+        self.cache_manager = CacheManager()
+        asyncio.create_task(self.cache_manager.initialize())
         self.auto_disconnect_task.start()
 
     def cog_unload(self):
         self.auto_disconnect_task.cancel()
+        asyncio.create_task(self.cache_manager.close())
 
     # --- Helpers ---
 
@@ -221,6 +225,7 @@ class Music(commands.Cog):
                 loop=self.bot.loop,
                 volume=gq.volume,
                 audio_filter=gq.audio_filter,
+                cache_manager=self.cache_manager,
             )
         except Exception as e:
             await ctx.send(f"Error playing **{song.title}**: {e}")
@@ -639,6 +644,7 @@ class Music(commands.Cog):
                 volume=gq.volume,
                 seek_to=seconds,
                 audio_filter=gq.audio_filter,
+                cache_manager=self.cache_manager,
             )
         except Exception as e:
             await ctx.send(f"Error seeking: {e}")
@@ -741,6 +747,7 @@ class Music(commands.Cog):
                 volume=gq.volume,
                 seek_to=elapsed,
                 audio_filter=gq.audio_filter,
+                cache_manager=self.cache_manager,
             )
         except Exception as e:
             await ctx.send(f"Error applying filter: {e}")
@@ -850,6 +857,25 @@ class Music(commands.Cog):
         gq.audio_filter_name = ""
         await self._apply_filter(ctx)
         await ctx.send("Cleared all audio effects.")
+
+    @commands.hybrid_command(name="cachestats", description="Show audio cache statistics")
+    async def cachestats(self, ctx: commands.Context):
+        stats = await self.cache_manager.get_stats()
+        total = stats["hits"] + stats["misses"]
+        ratio = f"{stats['hits'] / total * 100:.0f}%" if total > 0 else "N/A"
+        embed = discord.Embed(title="Audio Cache Stats", color=discord.Color.teal())
+        embed.add_field(name="Cached Files", value=str(stats["count"]), inline=True)
+        embed.add_field(name="Size", value=f"{stats['total_size_mb']} / {stats['max_size_mb']} MB", inline=True)
+        embed.add_field(name="Hit Rate", value=f"{ratio} ({stats['hits']} hits, {stats['misses']} misses)", inline=False)
+        await ctx.send(embed=embed)
+
+    @commands.hybrid_command(name="clearcache", description="Clear the audio cache")
+    async def clearcache(self, ctx: commands.Context):
+        if not self._check_dj(ctx):
+            await ctx.send("You need the DJ role to clear the cache.")
+            return
+        await self.cache_manager.clear_all()
+        await ctx.send("Audio cache cleared.")
 
     @commands.hybrid_command(name="247", description="Toggle 24/7 mode (stay in voice channel)")
     async def twenty_four_seven(self, ctx: commands.Context):

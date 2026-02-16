@@ -28,8 +28,10 @@ YTDL_PLAYLIST_OPTIONS = {
     "extract_flat": True,
 }
 
+FFMPEG_BEFORE_OPTIONS_STREAM = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 200000"
+FFMPEG_BEFORE_OPTIONS_LOCAL = "-probesize 200000"
 FFMPEG_OPTIONS = {
-    "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 200000",
+    "before_options": FFMPEG_BEFORE_OPTIONS_STREAM,
     "options": "-vn -bufsize 512k",
 }
 
@@ -49,7 +51,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
         self.thumbnail = data.get("thumbnail", "")
 
     @classmethod
-    async def create_source(cls, search: str, *, loop: asyncio.AbstractEventLoop = None, volume: float = 0.5, seek_to: int = 0, audio_filter: str = ""):
+    async def create_source(cls, search: str, *, loop: asyncio.AbstractEventLoop = None, volume: float = 0.5, seek_to: int = 0, audio_filter: str = "", cache_manager=None):
         loop = loop or asyncio.get_event_loop()
         partial = functools.partial(ytdl.extract_info, search, download=False)
         data = await loop.run_in_executor(None, partial)
@@ -57,7 +59,29 @@ class YTDLSource(discord.PCMVolumeTransformer):
         if "entries" in data:
             data = data["entries"][0]
 
-        before_options = FFMPEG_OPTIONS["before_options"]
+        # Determine audio source: cached local file or stream URL
+        audio_path = data["url"]
+        is_local = False
+
+        if cache_manager and data.get("webpage_url"):
+            from utils.cache import CacheManager
+            cache_key = CacheManager.extract_cache_key(data["webpage_url"])
+            cached = await cache_manager.get_cached_path(cache_key)
+            if cached:
+                audio_path = cached
+                is_local = True
+            else:
+                downloaded = await cache_manager.download_and_cache(
+                    cache_key,
+                    data["webpage_url"],
+                    data.get("duration"),
+                    data.get("is_live", False),
+                )
+                if downloaded:
+                    audio_path = downloaded
+                    is_local = True
+
+        before_options = FFMPEG_BEFORE_OPTIONS_LOCAL if is_local else FFMPEG_BEFORE_OPTIONS_STREAM
         if seek_to > 0:
             before_options = f"-ss {seek_to} {before_options}"
 
@@ -66,7 +90,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
             options = f"{options} -af {audio_filter}"
 
         source = discord.FFmpegPCMAudio(
-            data["url"],
+            audio_path,
             before_options=before_options,
             options=options,
         )

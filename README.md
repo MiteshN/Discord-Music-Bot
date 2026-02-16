@@ -17,6 +17,7 @@ A feature-rich Discord music bot built with Python that supports YouTube, Spotif
 - **24/7 mode** — Keep the bot in the voice channel indefinitely
 - **DJ role** — Restrict destructive commands to users with a "DJ" role
 - **Vote skip** — Majority vote required to skip when 3+ users are in the channel
+- **Audio caching** — Downloads audio to disk for instant replay of repeated songs, with LRU eviction
 - **Auto-disconnect** — Leaves the voice channel after 3 minutes of inactivity
 - **Voice channel status** — Displays the current track in the voice channel status
 - **Slash commands** — All commands work as both `!prefix` and `/slash` commands
@@ -50,6 +51,8 @@ A feature-rich Discord music bot built with Python that supports YouTube, Spotif
 | `!vibrato` | Apply vibrato effect (pitch oscillation) |
 | `!8d` | Apply 8D audio effect (stereo rotation) |
 | `!cleareffect` | Remove all audio effects |
+| `!cachestats` | Show audio cache statistics (files, size, hit rate) |
+| `!clearcache` | Clear all cached audio files (DJ role) |
 
 ## Setup
 
@@ -119,11 +122,15 @@ services:
   bot:
     image: ghcr.io/miteshn/discord-music-bot:latest
     restart: always
+    volumes:
+      - ./cache:/app/cache
     environment:
       - DISCORD_BOT_TOKEN=
       - SPOTIFY_CLIENT_ID=
       - SPOTIFY_CLIENT_SECRET=
       - GENIUS_API_TOKEN=
+      # - CACHE_LIMIT_MB=2048
+      # - MAX_CACHE_DURATION=1800
 ```
 
 Fill in your tokens after the `=` signs, then:
@@ -135,9 +142,20 @@ docker compose down              # stop the bot
 docker compose up -d --build     # rebuild after code changes
 ```
 
+## Audio Cache
+
+The bot caches downloaded audio files to disk so repeated songs play instantly without re-fetching. Livestreams and tracks over 30 minutes are streamed directly and not cached. When the cache exceeds its size limit, the least recently played files are evicted automatically.
+
+| Environment Variable | Default | Description |
+|---|---|---|
+| `CACHE_LIMIT_MB` | `2048` | Maximum cache size in MB |
+| `MAX_CACHE_DURATION` | `1800` | Max track duration (seconds) to cache |
+
+The volume mount (`./cache:/app/cache`) in Docker Compose ensures the cache persists across container restarts.
+
 ## DJ Role
 
-If a role named **DJ** exists in your server, only users with that role (or admins) can use: `skip`, `stop`, `volume`, `remove`, `shuffle`. If no DJ role exists, all commands are unrestricted.
+If a role named **DJ** exists in your server, only users with that role (or admins) can use: `skip`, `stop`, `volume`, `remove`, `shuffle`, `clearcache`. If no DJ role exists, all commands are unrestricted.
 
 ## License
 
