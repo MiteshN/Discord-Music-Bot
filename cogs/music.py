@@ -11,6 +11,7 @@ from utils.youtube import YTDLSource
 from utils.spotify import SpotifyResolver
 from utils.lyrics import LyricsFetcher
 from utils.cache import CacheManager
+from utils.settings import GuildSettings
 
 YOUTUBE_PLAYLIST_RE = re.compile(r"(youtube\.com/.*[?&]list=|youtu\.be/.*[?&]list=)")
 
@@ -178,13 +179,20 @@ class Music(commands.Cog):
         self.spotify = SpotifyResolver()
         self.lyrics_fetcher = LyricsFetcher()
         self.cache_manager = CacheManager()
-        asyncio.create_task(self.cache_manager.initialize())
+        self.settings = GuildSettings()
+        asyncio.create_task(self._init_async())
+        self._loaded_guilds: set[int] = set()
         self._restarting: set[int] = set()  # guild IDs currently restarting playback
         self.auto_disconnect_task.start()
+
+    async def _init_async(self):
+        await self.cache_manager.initialize()
+        await self.settings.initialize()
 
     def cog_unload(self):
         self.auto_disconnect_task.cancel()
         asyncio.create_task(self.cache_manager.close())
+        asyncio.create_task(self.settings.close())
 
     # --- Helpers ---
 
@@ -215,7 +223,18 @@ class Music(commands.Cog):
             return True
         return dj_role in ctx.author.roles
 
+    async def _ensure_settings(self, guild_id: int):
+        if guild_id in self._loaded_guilds:
+            return
+        self._loaded_guilds.add(guild_id)
+        saved = await self.settings.load(guild_id)
+        if saved:
+            gq = self.queue_manager.get(guild_id)
+            gq.volume = saved["volume"]
+            gq.twenty_four_seven = saved["twenty_four_seven"]
+
     async def _play_song(self, ctx: commands.Context, song: Song):
+        await self._ensure_settings(ctx.guild.id)
         gq = self.queue_manager.get(ctx.guild.id)
         gq.current = song
         gq.skip_votes.clear()
@@ -557,10 +576,12 @@ class Music(commands.Cog):
         if not 0 <= vol <= 100:
             await ctx.send("Volume must be between 0 and 100.")
             return
+        await self._ensure_settings(ctx.guild.id)
         gq = self.queue_manager.get(ctx.guild.id)
         gq.volume = vol / 100
         if ctx.voice_client and ctx.voice_client.source:
             ctx.voice_client.source.volume = gq.volume
+        await self.settings.save(ctx.guild.id, gq.volume, gq.twenty_four_seven)
         await ctx.send(f"Volume set to **{vol}%**.")
 
     @commands.hybrid_command(name="nowplaying", aliases=["np"], description="Show the currently playing track")
@@ -891,8 +912,10 @@ class Music(commands.Cog):
         if not self._check_dj(ctx):
             await ctx.send("You need the DJ role to toggle 24/7 mode.")
             return
+        await self._ensure_settings(ctx.guild.id)
         gq = self.queue_manager.get(ctx.guild.id)
         gq.twenty_four_seven = not gq.twenty_four_seven
+        await self.settings.save(ctx.guild.id, gq.volume, gq.twenty_four_seven)
         state = "enabled" if gq.twenty_four_seven else "disabled"
         await ctx.send(f"24/7 mode **{state}**. {'I will stay in the voice channel.' if gq.twenty_four_seven else 'I will auto-disconnect after inactivity.'}")
 
