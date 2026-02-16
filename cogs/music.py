@@ -34,6 +34,142 @@ def parse_timestamp(ts: str) -> int:
     return parts[0]
 
 
+class NowPlayingView(discord.ui.View):
+    def __init__(self, cog, ctx):
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.ctx = ctx
+
+    def _in_voice(self, interaction: discord.Interaction) -> bool:
+        return (
+            interaction.user.voice
+            and interaction.guild.voice_client
+            and interaction.user.voice.channel == interaction.guild.voice_client.channel
+        )
+
+    @discord.ui.button(emoji="⏯️", style=discord.ButtonStyle.primary)
+    async def pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self._in_voice(interaction):
+            await interaction.response.send_message("You need to be in the voice channel.", ephemeral=True)
+            return
+        vc = interaction.guild.voice_client
+        if vc.is_playing():
+            vc.pause()
+            await interaction.response.send_message("Paused.", ephemeral=True)
+        elif vc.is_paused():
+            vc.resume()
+            await interaction.response.send_message("Resumed.", ephemeral=True)
+        else:
+            await interaction.response.send_message("Nothing is playing.", ephemeral=True)
+
+    @discord.ui.button(emoji="⏭️", style=discord.ButtonStyle.primary)
+    async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self._in_voice(interaction):
+            await interaction.response.send_message("You need to be in the voice channel.", ephemeral=True)
+            return
+        vc = interaction.guild.voice_client
+        if not vc.is_playing() and not vc.is_paused():
+            await interaction.response.send_message("Nothing is playing.", ephemeral=True)
+            return
+        vc.stop()
+        await interaction.response.send_message("Skipped.", ephemeral=True)
+
+    @discord.ui.button(emoji="⏹️", style=discord.ButtonStyle.danger)
+    async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self._in_voice(interaction):
+            await interaction.response.send_message("You need to be in the voice channel.", ephemeral=True)
+            return
+        vc = interaction.guild.voice_client
+        gq = self.cog.queue_manager.get(interaction.guild.id)
+        gq.clear()
+        await self.cog._set_vc_status(vc, None)
+        vc.stop()
+        await vc.disconnect()
+        self.stop()
+        await interaction.response.send_message("Stopped and disconnected.", ephemeral=True)
+
+    @discord.ui.button(emoji="🔁", style=discord.ButtonStyle.secondary)
+    async def loop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self._in_voice(interaction):
+            await interaction.response.send_message("You need to be in the voice channel.", ephemeral=True)
+            return
+        gq = self.cog.queue_manager.get(interaction.guild.id)
+        # Cycle: off -> track -> queue -> off
+        cycle = [LoopMode.OFF, LoopMode.TRACK, LoopMode.QUEUE]
+        current_idx = cycle.index(gq.loop_mode)
+        gq.loop_mode = cycle[(current_idx + 1) % len(cycle)]
+        labels = {LoopMode.OFF: "Loop: Off", LoopMode.TRACK: "Loop: Track", LoopMode.QUEUE: "Loop: Queue"}
+        await interaction.response.send_message(f"**{labels[gq.loop_mode]}**", ephemeral=True)
+
+    @discord.ui.button(emoji="🔀", style=discord.ButtonStyle.secondary)
+    async def shuffle(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self._in_voice(interaction):
+            await interaction.response.send_message("You need to be in the voice channel.", ephemeral=True)
+            return
+        gq = self.cog.queue_manager.get(interaction.guild.id)
+        if not gq.queue:
+            await interaction.response.send_message("Queue is empty.", ephemeral=True)
+            return
+        gq.shuffle()
+        await interaction.response.send_message("Queue shuffled.", ephemeral=True)
+
+
+class SearchSelectView(discord.ui.View):
+    def __init__(self, *, options, results, cog, ctx, author_id):
+        super().__init__(timeout=30)
+        self.results = results
+        self.cog = cog
+        self.ctx = ctx
+        self.author_id = author_id
+        self.select = discord.ui.Select(
+            placeholder="Pick a track...",
+            options=options,
+        )
+        self.select.callback = self.select_callback
+        self.add_item(self.select)
+
+    async def select_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("This isn't your search.", ephemeral=True)
+            return
+
+        index = int(self.select.values[0])
+        chosen = self.results[index]
+
+        vc = await self.cog._ensure_voice(self.ctx)
+        if not vc:
+            await interaction.response.send_message("You need to be in a voice channel.", ephemeral=True)
+            return
+
+        gq = self.cog.queue_manager.get(self.ctx.guild.id)
+        song = Song(
+            title=chosen.get("title", "Unknown"),
+            url=chosen.get("webpage_url", ""),
+            search_query=chosen.get("title", ""),
+            requester=self.ctx.author.display_name,
+            duration=chosen.get("duration") or 0,
+            thumbnail=chosen.get("thumbnail", ""),
+        )
+        gq.add(song)
+
+        if vc.is_playing() or vc.is_paused():
+            await interaction.response.send_message(f"Added **{song.title}** to the queue.")
+        else:
+            await interaction.response.defer()
+            next_song = gq.next()
+            if next_song:
+                await self.cog._play_song(self.ctx, next_song)
+        self.stop()
+
+    async def on_timeout(self):
+        self.select.disabled = True
+        self.select.placeholder = "Search timed out"
+        try:
+            msg = self.select.view.message if hasattr(self.select.view, 'message') else None
+        except Exception:
+            pass
+
+
 class Music(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -46,6 +182,12 @@ class Music(commands.Cog):
         self.auto_disconnect_task.cancel()
 
     # --- Helpers ---
+
+    async def _set_vc_status(self, vc: discord.VoiceClient, status: str | None):
+        try:
+            await vc.channel.edit(status=status)
+        except (discord.Forbidden, discord.HTTPException, AttributeError):
+            pass
 
     async def _ensure_voice(self, ctx: commands.Context) -> discord.VoiceClient | None:
         if not ctx.author.voice:
@@ -78,6 +220,7 @@ class Music(commands.Cog):
                 song.url or song.search_query,
                 loop=self.bot.loop,
                 volume=gq.volume,
+                audio_filter=gq.audio_filter,
             )
         except Exception as e:
             await ctx.send(f"Error playing **{song.title}**: {e}")
@@ -97,22 +240,37 @@ class Music(commands.Cog):
 
         ctx.voice_client.play(source, after=after_play)
 
+        # Set voice channel status
+        vc_status = f"🎵 {song.title}"
+        if len(vc_status) > 500:
+            vc_status = vc_status[:497] + "..."
+        await self._set_vc_status(ctx.voice_client, vc_status)
+
+        if song.duration > 0:
+            bar = "🔘" + "▬" * 20
+            progress_text = f"{bar} `0:00 / {format_duration(song.duration)}`"
+        else:
+            progress_text = "🔴 Live"
+
         embed = discord.Embed(
             title="Now Playing",
             description=f"[{song.title}]({song.url})",
             color=discord.Color.green(),
         )
-        embed.add_field(name="Duration", value=format_duration(song.duration))
-        embed.add_field(name="Requested by", value=song.requester)
+        embed.add_field(name="Progress", value=progress_text, inline=False)
+        embed.add_field(name="Requested by", value=song.requester, inline=True)
         if song.thumbnail:
             embed.set_thumbnail(url=song.thumbnail)
-        await ctx.send(embed=embed)
+        view = NowPlayingView(cog=self, ctx=ctx)
+        await ctx.send(embed=embed, view=view)
 
     async def _play_next_async(self, ctx: commands.Context):
         gq = self.queue_manager.get(ctx.guild.id)
         next_song = gq.next()
         if next_song:
             await self._play_song(ctx, next_song)
+        elif ctx.voice_client:
+            await self._set_vc_status(ctx.voice_client, None)
 
     def _play_next(self, ctx: commands.Context):
         asyncio.run_coroutine_threadsafe(self._play_next_async(ctx), self.bot.loop)
@@ -134,10 +292,13 @@ class Music(commands.Cog):
     async def auto_disconnect_task(self):
         for vc in self.bot.voice_clients:
             gq = self.queue_manager.get(vc.guild.id)
+            if gq.twenty_four_seven:
+                continue
             if not vc.is_playing() and not vc.is_paused() and not gq.queue:
                 if gq.start_time and (time.time() - gq.start_time) > 180:
                     gq.clear()
                     self.queue_manager.remove(vc.guild.id)
+                    await self._set_vc_status(vc, None)
                     await vc.disconnect()
                 elif not gq.current and not gq.start_time:
                     pass  # just connected, no timeout yet
@@ -257,6 +418,41 @@ class Music(commands.Cog):
             if next_song:
                 await self._play_song(ctx, next_song)
 
+    @commands.hybrid_command(name="playtop", aliases=["pt"], description="Add a song to the top of the queue")
+    @app_commands.autocomplete(query=play_autocomplete)
+    async def playtop(self, ctx: commands.Context, *, query: str):
+        vc = await self._ensure_voice(ctx)
+        if not vc:
+            return
+
+        gq = self.queue_manager.get(ctx.guild.id)
+
+        # If nothing is playing, just play normally
+        if not vc.is_playing() and not vc.is_paused():
+            song = Song(title=query, url=query, search_query=query, requester=ctx.author.display_name)
+            gq.add(song)
+            next_song = gq.next()
+            if next_song:
+                await self._play_song(ctx, next_song)
+            return
+
+        # Spotify handling
+        if SpotifyResolver.is_spotify_url(query):
+            async with ctx.typing():
+                searches = await self.bot.loop.run_in_executor(None, self.spotify.resolve, query)
+            if not searches:
+                await ctx.send("Could not resolve Spotify URL.")
+                return
+            for s in reversed(searches):
+                song = Song(title=s, url="", search_query=s, requester=ctx.author.display_name)
+                gq.add_top(song)
+            await ctx.send(f"Added **{len(searches)}** track(s) from Spotify to the top of the queue.")
+            return
+
+        song = Song(title=query, url=query, search_query=query, requester=ctx.author.display_name)
+        gq.add_top(song)
+        await ctx.send(f"Added **{query}** to the top of the queue.")
+
     @commands.hybrid_command(name="skip", description="Skip the current track")
     async def skip(self, ctx: commands.Context):
         if not ctx.voice_client or not ctx.voice_client.is_playing():
@@ -297,6 +493,7 @@ class Music(commands.Cog):
         gq = self.queue_manager.get(ctx.guild.id)
         gq.clear()
         if ctx.voice_client:
+            await self._set_vc_status(ctx.voice_client, None)
             ctx.voice_client.stop()
             await ctx.voice_client.disconnect()
         await ctx.send("Stopped and disconnected.")
@@ -308,6 +505,7 @@ class Music(commands.Cog):
             return
         gq = self.queue_manager.get(ctx.guild.id)
         gq.clear()
+        await self._set_vc_status(ctx.voice_client, None)
         ctx.voice_client.stop()
         await ctx.voice_client.disconnect()
         await ctx.send("Disconnected.")
@@ -440,6 +638,7 @@ class Music(commands.Cog):
                 loop=self.bot.loop,
                 volume=gq.volume,
                 seek_to=seconds,
+                audio_filter=gq.audio_filter,
             )
         except Exception as e:
             await ctx.send(f"Error seeking: {e}")
@@ -478,49 +677,25 @@ class Music(commands.Cog):
             return
 
         embed = discord.Embed(title=f"Search results for: {query}", color=discord.Color.orange())
-        reactions = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
-        for i, entry in enumerate(results[:5]):
+        options = []
+        for i, entry in enumerate(results[:5], 1):
             title = entry.get("title", "Unknown")
             duration = format_duration(entry.get("duration") or 0)
-            embed.add_field(name=f"{reactions[i]} {title}", value=f"Duration: {duration}", inline=False)
+            embed.add_field(name=f"{i}. {title}", value=f"Duration: {duration}", inline=False)
+            options.append(discord.SelectOption(
+                label=f"{i}. {title}"[:100],
+                description=f"Duration: {duration}",
+                value=str(i - 1),
+            ))
 
-        msg = await ctx.send(embed=embed)
-        for i in range(min(len(results), 5)):
-            await msg.add_reaction(reactions[i])
-
-        def check(reaction, user):
-            return user == ctx.author and str(reaction.emoji) in reactions and reaction.message.id == msg.id
-
-        try:
-            reaction, _ = await self.bot.wait_for("reaction_add", timeout=30.0, check=check)
-        except asyncio.TimeoutError:
-            await msg.edit(content="Search timed out.", embed=None)
-            return
-
-        index = reactions.index(str(reaction.emoji))
-        chosen = results[index]
-
-        vc = await self._ensure_voice(ctx)
-        if not vc:
-            return
-
-        gq = self.queue_manager.get(ctx.guild.id)
-        song = Song(
-            title=chosen.get("title", "Unknown"),
-            url=chosen.get("webpage_url", ""),
-            search_query=chosen.get("title", ""),
-            requester=ctx.author.display_name,
-            duration=chosen.get("duration") or 0,
-            thumbnail=chosen.get("thumbnail", ""),
+        view = SearchSelectView(
+            options=options,
+            results=results,
+            cog=self,
+            ctx=ctx,
+            author_id=ctx.author.id,
         )
-        gq.add(song)
-
-        if vc.is_playing() or vc.is_paused():
-            await ctx.send(f"Added **{song.title}** to the queue.")
-        else:
-            next_song = gq.next()
-            if next_song:
-                await self._play_song(ctx, next_song)
+        await ctx.send(embed=embed, view=view)
 
     @commands.hybrid_command(name="lyrics", description="Show lyrics for the current track")
     async def lyrics(self, ctx: commands.Context):
@@ -544,6 +719,147 @@ class Music(commands.Cog):
                 color=discord.Color.purple(),
             )
             await ctx.send(embed=embed)
+
+
+    # --- Audio Filter Commands ---
+
+    async def _apply_filter(self, ctx: commands.Context):
+        """Restart playback from current position with the active audio filter."""
+        gq = self.queue_manager.get(ctx.guild.id)
+        if not gq.current:
+            return
+        if not ctx.voice_client or (not ctx.voice_client.is_playing() and not ctx.voice_client.is_paused()):
+            return
+
+        elapsed = int(time.time() - gq.start_time) if gq.start_time else 0
+        ctx.voice_client.stop()
+
+        try:
+            source = await YTDLSource.create_source(
+                gq.current.url or gq.current.search_query,
+                loop=self.bot.loop,
+                volume=gq.volume,
+                seek_to=elapsed,
+                audio_filter=gq.audio_filter,
+            )
+        except Exception as e:
+            await ctx.send(f"Error applying filter: {e}")
+            return
+
+        gq.start_time = time.time() - elapsed
+
+        def after_play(error):
+            if error:
+                print(f"Playback error: {error}")
+            asyncio.run_coroutine_threadsafe(self._play_next_async(ctx), self.bot.loop)
+
+        ctx.voice_client.play(source, after=after_play)
+
+    @commands.hybrid_command(name="nightcore", description="Apply nightcore effect (speed up + pitch up)")
+    async def nightcore(self, ctx: commands.Context):
+        if not ctx.voice_client or (not ctx.voice_client.is_playing() and not ctx.voice_client.is_paused()):
+            await ctx.send("Nothing is playing.")
+            return
+        gq = self.queue_manager.get(ctx.guild.id)
+        gq.audio_filter = "asetrate=48000*1.25,aresample=48000,atempo=1.0"
+        gq.audio_filter_name = "Nightcore"
+        await self._apply_filter(ctx)
+        await ctx.send("Applied **Nightcore** effect.")
+
+    @commands.hybrid_command(name="vaporwave", description="Apply vaporwave effect (slow down + pitch down)")
+    async def vaporwave(self, ctx: commands.Context):
+        if not ctx.voice_client or (not ctx.voice_client.is_playing() and not ctx.voice_client.is_paused()):
+            await ctx.send("Nothing is playing.")
+            return
+        gq = self.queue_manager.get(ctx.guild.id)
+        gq.audio_filter = "asetrate=48000*0.8,aresample=48000,atempo=1.0"
+        gq.audio_filter_name = "Vaporwave"
+        await self._apply_filter(ctx)
+        await ctx.send("Applied **Vaporwave** effect.")
+
+    @commands.hybrid_command(name="bassboost", description="Boost bass frequencies")
+    async def bassboost(self, ctx: commands.Context):
+        if not ctx.voice_client or (not ctx.voice_client.is_playing() and not ctx.voice_client.is_paused()):
+            await ctx.send("Nothing is playing.")
+            return
+        gq = self.queue_manager.get(ctx.guild.id)
+        gq.audio_filter = "bass=g=10"
+        gq.audio_filter_name = "Bass Boost"
+        await self._apply_filter(ctx)
+        await ctx.send("Applied **Bass Boost** effect.")
+
+    @commands.hybrid_command(name="speed", description="Change playback speed (0.5-2.0)")
+    async def speed(self, ctx: commands.Context, rate: float):
+        if not ctx.voice_client or (not ctx.voice_client.is_playing() and not ctx.voice_client.is_paused()):
+            await ctx.send("Nothing is playing.")
+            return
+        if not 0.5 <= rate <= 2.0:
+            await ctx.send("Speed must be between 0.5 and 2.0.")
+            return
+        gq = self.queue_manager.get(ctx.guild.id)
+        gq.audio_filter = f"atempo={rate}"
+        gq.audio_filter_name = f"Speed {rate}x"
+        await self._apply_filter(ctx)
+        await ctx.send(f"Applied **Speed {rate}x** effect.")
+
+    @commands.hybrid_command(name="tremolo", description="Apply tremolo effect (volume oscillation)")
+    async def tremolo(self, ctx: commands.Context):
+        if not ctx.voice_client or (not ctx.voice_client.is_playing() and not ctx.voice_client.is_paused()):
+            await ctx.send("Nothing is playing.")
+            return
+        gq = self.queue_manager.get(ctx.guild.id)
+        gq.audio_filter = "tremolo=f=4:d=0.7"
+        gq.audio_filter_name = "Tremolo"
+        await self._apply_filter(ctx)
+        await ctx.send("Applied **Tremolo** effect.")
+
+    @commands.hybrid_command(name="vibrato", description="Apply vibrato effect (pitch oscillation)")
+    async def vibrato(self, ctx: commands.Context):
+        if not ctx.voice_client or (not ctx.voice_client.is_playing() and not ctx.voice_client.is_paused()):
+            await ctx.send("Nothing is playing.")
+            return
+        gq = self.queue_manager.get(ctx.guild.id)
+        gq.audio_filter = "vibrato=f=4:d=0.5"
+        gq.audio_filter_name = "Vibrato"
+        await self._apply_filter(ctx)
+        await ctx.send("Applied **Vibrato** effect.")
+
+    @commands.hybrid_command(name="8d", description="Apply 8D audio effect (stereo rotation)")
+    async def eightd(self, ctx: commands.Context):
+        if not ctx.voice_client or (not ctx.voice_client.is_playing() and not ctx.voice_client.is_paused()):
+            await ctx.send("Nothing is playing.")
+            return
+        gq = self.queue_manager.get(ctx.guild.id)
+        gq.audio_filter = "apulsator=hz=0.15"
+        gq.audio_filter_name = "8D"
+        await self._apply_filter(ctx)
+        await ctx.send("Applied **8D** audio effect.")
+
+    @commands.hybrid_command(name="cleareffect", description="Remove all audio effects")
+    async def cleareffect(self, ctx: commands.Context):
+        gq = self.queue_manager.get(ctx.guild.id)
+        if not gq.audio_filter:
+            await ctx.send("No audio effects are active.")
+            return
+        if not ctx.voice_client or (not ctx.voice_client.is_playing() and not ctx.voice_client.is_paused()):
+            gq.audio_filter = ""
+            gq.audio_filter_name = ""
+            await ctx.send("Cleared audio effects.")
+            return
+        gq.audio_filter = ""
+        gq.audio_filter_name = ""
+        await self._apply_filter(ctx)
+        await ctx.send("Cleared all audio effects.")
+
+    @commands.hybrid_command(name="247", description="Toggle 24/7 mode (stay in voice channel)")
+    async def twenty_four_seven(self, ctx: commands.Context):
+        if not self._check_dj(ctx):
+            await ctx.send("You need the DJ role to toggle 24/7 mode.")
+            return
+        gq = self.queue_manager.get(ctx.guild.id)
+        gq.twenty_four_seven = not gq.twenty_four_seven
+        state = "enabled" if gq.twenty_four_seven else "disabled"
+        await ctx.send(f"24/7 mode **{state}**. {'I will stay in the voice channel.' if gq.twenty_four_seven else 'I will auto-disconnect after inactivity.'}")
 
 
 async def setup(bot: commands.Bot):

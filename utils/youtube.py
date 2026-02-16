@@ -16,6 +16,12 @@ YTDL_OPTIONS = {
     "extract_flat": False,
 }
 
+YTDL_SEARCH_OPTIONS = {
+    **YTDL_OPTIONS,
+    "ignoreerrors": True,
+    "extract_flat": True,
+}
+
 YTDL_PLAYLIST_OPTIONS = {
     **YTDL_OPTIONS,
     "noplaylist": False,
@@ -28,6 +34,7 @@ FFMPEG_OPTIONS = {
 }
 
 ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
+ytdl_search = yt_dlp.YoutubeDL(YTDL_SEARCH_OPTIONS)
 ytdl_playlist = yt_dlp.YoutubeDL(YTDL_PLAYLIST_OPTIONS)
 
 
@@ -42,7 +49,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
         self.thumbnail = data.get("thumbnail", "")
 
     @classmethod
-    async def create_source(cls, search: str, *, loop: asyncio.AbstractEventLoop = None, volume: float = 0.5, seek_to: int = 0):
+    async def create_source(cls, search: str, *, loop: asyncio.AbstractEventLoop = None, volume: float = 0.5, seek_to: int = 0, audio_filter: str = ""):
         loop = loop or asyncio.get_event_loop()
         partial = functools.partial(ytdl.extract_info, search, download=False)
         data = await loop.run_in_executor(None, partial)
@@ -54,19 +61,34 @@ class YTDLSource(discord.PCMVolumeTransformer):
         if seek_to > 0:
             before_options = f"-ss {seek_to} {before_options}"
 
+        options = FFMPEG_OPTIONS["options"]
+        if audio_filter:
+            options = f"{options} -af {audio_filter}"
+
         source = discord.FFmpegPCMAudio(
             data["url"],
             before_options=before_options,
-            options=FFMPEG_OPTIONS["options"],
+            options=options,
         )
         return cls(source, data=data, volume=volume)
 
     @classmethod
     async def search_results(cls, query: str, count: int = 5, *, loop: asyncio.AbstractEventLoop = None):
         loop = loop or asyncio.get_event_loop()
-        partial = functools.partial(ytdl.extract_info, f"ytsearch{count}:{query}", download=False)
+        # Request extra to account for non-video results (channels, playlists)
+        partial = functools.partial(ytdl_search.extract_info, f"ytsearch{count + 3}:{query}", download=False)
         data = await loop.run_in_executor(None, partial)
-        return data.get("entries", [])
+        entries = []
+        for e in data.get("entries", []):
+            if not e or not e.get("title"):
+                continue
+            # Skip channels and playlists — only keep videos
+            if e.get("ie_key") == "YoutubeTab" or not e.get("duration"):
+                continue
+            e["webpage_url"] = e.get("url") or f"https://www.youtube.com/watch?v={e['id']}"
+            e["duration"] = int(e.get("duration") or 0)
+            entries.append(e)
+        return entries[:count]
 
     @classmethod
     async def extract_playlist(cls, url: str, *, loop: asyncio.AbstractEventLoop = None):

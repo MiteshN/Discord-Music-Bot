@@ -29,9 +29,15 @@ class GuildQueue:
     loop_mode: LoopMode = LoopMode.OFF
     start_time: float = 0.0
     skip_votes: set = field(default_factory=set)
+    twenty_four_seven: bool = False
+    audio_filter: str = ""
+    audio_filter_name: str = ""
 
     def add(self, song: Song):
         self.queue.append(song)
+
+    def add_top(self, song: Song):
+        self.queue.insert(0, song)
 
     def next(self) -> Song | None:
         if self.loop_mode == LoopMode.TRACK and self.current:
