@@ -179,6 +179,7 @@ class Music(commands.Cog):
         self.lyrics_fetcher = LyricsFetcher()
         self.cache_manager = CacheManager()
         asyncio.create_task(self.cache_manager.initialize())
+        self._restarting: set[int] = set()  # guild IDs currently restarting playback
         self.auto_disconnect_task.start()
 
     def cog_unload(self):
@@ -270,6 +271,9 @@ class Music(commands.Cog):
         await ctx.send(embed=embed, view=view)
 
     async def _play_next_async(self, ctx: commands.Context):
+        # Skip advancing the queue if we're just restarting playback (seek/filter)
+        if ctx.guild.id in self._restarting:
+            return
         gq = self.queue_manager.get(ctx.guild.id)
         next_song = gq.next()
         if next_song:
@@ -636,6 +640,7 @@ class Music(commands.Cog):
             await ctx.send("Timestamp exceeds track duration.")
             return
 
+        self._restarting.add(ctx.guild.id)
         ctx.voice_client.stop()
         try:
             source = await YTDLSource.create_source(
@@ -647,12 +652,13 @@ class Music(commands.Cog):
                 cache_manager=self.cache_manager,
             )
         except Exception as e:
+            self._restarting.discard(ctx.guild.id)
             await ctx.send(f"Error seeking: {e}")
             return
 
         gq.start_time = time.time() - seconds
+        self._restarting.discard(ctx.guild.id)
 
-        # Prevent after callback from advancing queue
         def after_play(error):
             if error:
                 print(f"Playback error: {error}")
@@ -738,6 +744,7 @@ class Music(commands.Cog):
             return
 
         elapsed = int(time.time() - gq.start_time) if gq.start_time else 0
+        self._restarting.add(ctx.guild.id)
         ctx.voice_client.stop()
 
         try:
@@ -750,10 +757,12 @@ class Music(commands.Cog):
                 cache_manager=self.cache_manager,
             )
         except Exception as e:
+            self._restarting.discard(ctx.guild.id)
             await ctx.send(f"Error applying filter: {e}")
             return
 
         gq.start_time = time.time() - elapsed
+        self._restarting.discard(ctx.guild.id)
 
         def after_play(error):
             if error:

@@ -28,8 +28,8 @@ YTDL_PLAYLIST_OPTIONS = {
     "extract_flat": True,
 }
 
-FFMPEG_BEFORE_OPTIONS_STREAM = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 200000"
-FFMPEG_BEFORE_OPTIONS_LOCAL = "-probesize 200000"
+FFMPEG_BEFORE_OPTIONS_STREAM = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 200000 -thread_queue_size 4096"
+FFMPEG_BEFORE_OPTIONS_LOCAL = "-probesize 200000 -thread_queue_size 4096"
 FFMPEG_OPTIONS = {
     "before_options": FFMPEG_BEFORE_OPTIONS_STREAM,
     "options": "-vn -bufsize 512k",
