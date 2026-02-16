@@ -1,10 +1,13 @@
 import asyncio
+import logging
 import time
 import re
 import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
+
+log = logging.getLogger("bot.music")
 
 from utils.queue_manager import QueueManager, Song, LoopMode
 from utils.youtube import YTDLSource
@@ -184,10 +187,13 @@ class Music(commands.Cog):
         self._loaded_guilds: set[int] = set()
         self._restarting: set[int] = set()  # guild IDs currently restarting playback
         self.auto_disconnect_task.start()
+        log.info("Music cog loaded")
 
     async def _init_async(self):
         await self.cache_manager.initialize()
+        log.info("Cache manager initialized")
         await self.settings.initialize()
+        log.info("Guild settings DB initialized")
 
     def cog_unload(self):
         self.auto_disconnect_task.cancel()
@@ -232,6 +238,7 @@ class Music(commands.Cog):
             gq = self.queue_manager.get(guild_id)
             gq.volume = saved["volume"]
             gq.twenty_four_seven = saved["twenty_four_seven"]
+            log.info("Loaded settings for guild %d: volume=%.2f, 24/7=%s", guild_id, gq.volume, gq.twenty_four_seven)
 
     async def _play_song(self, ctx: commands.Context, song: Song):
         await self._ensure_settings(ctx.guild.id)
@@ -239,6 +246,7 @@ class Music(commands.Cog):
         gq.current = song
         gq.skip_votes.clear()
 
+        log.info("[Guild %d] Playing: %s (query=%s)", ctx.guild.id, song.title, song.url or song.search_query)
         try:
             source = await YTDLSource.create_source(
                 song.url or song.search_query,
@@ -248,6 +256,7 @@ class Music(commands.Cog):
                 cache_manager=self.cache_manager,
             )
         except Exception as e:
+            log.error("[Guild %d] Failed to create source for '%s': %s", ctx.guild.id, song.title, e)
             await ctx.send(f"Error playing **{song.title}**: {e}")
             self._play_next(ctx)
             return
@@ -257,10 +266,11 @@ class Music(commands.Cog):
         song.thumbnail = source.thumbnail
         song.url = source.webpage_url
         gq.start_time = time.time()
+        log.info("[Guild %d] Now playing: %s (%s)", ctx.guild.id, song.title, format_duration(song.duration))
 
         def after_play(error):
             if error:
-                print(f"Playback error: {error}")
+                log.error("[Guild %d] Playback error: %s", ctx.guild.id, error)
             asyncio.run_coroutine_threadsafe(self._play_next_async(ctx), self.bot.loop)
 
         ctx.voice_client.play(source, after=after_play)
@@ -296,9 +306,12 @@ class Music(commands.Cog):
         gq = self.queue_manager.get(ctx.guild.id)
         next_song = gq.next()
         if next_song:
+            log.info("[Guild %d] Advancing queue, next: %s (%d remaining)", ctx.guild.id, next_song.title, len(gq.queue))
             await self._play_song(ctx, next_song)
-        elif ctx.voice_client:
-            await self._set_vc_status(ctx.voice_client, None)
+        else:
+            log.info("[Guild %d] Queue empty, playback finished", ctx.guild.id)
+            if ctx.voice_client:
+                await self._set_vc_status(ctx.voice_client, None)
 
     def _play_next(self, ctx: commands.Context):
         asyncio.run_coroutine_threadsafe(self._play_next_async(ctx), self.bot.loop)
@@ -324,6 +337,7 @@ class Music(commands.Cog):
                 continue
             if not vc.is_playing() and not vc.is_paused() and not gq.queue:
                 if gq.start_time and (time.time() - gq.start_time) > 180:
+                    log.info("[Guild %d] Auto-disconnecting after 3min idle", vc.guild.id)
                     gq.clear()
                     self.queue_manager.remove(vc.guild.id)
                     await self._set_vc_status(vc, None)
@@ -390,6 +404,8 @@ class Music(commands.Cog):
     @commands.hybrid_command(name="play", description="Play a song from YouTube, Spotify, SoundCloud, or search")
     @app_commands.autocomplete(query=play_autocomplete)
     async def play(self, ctx: commands.Context, *, query: str):
+        if ctx.interaction:
+            await ctx.defer()
         vc = await self._ensure_voice(ctx)
         if not vc:
             return
@@ -449,6 +465,8 @@ class Music(commands.Cog):
     @commands.hybrid_command(name="playtop", aliases=["pt"], description="Add a song to the top of the queue")
     @app_commands.autocomplete(query=play_autocomplete)
     async def playtop(self, ctx: commands.Context, *, query: str):
+        if ctx.interaction:
+            await ctx.defer()
         vc = await self._ensure_voice(ctx)
         if not vc:
             return
@@ -682,7 +700,7 @@ class Music(commands.Cog):
 
         def after_play(error):
             if error:
-                print(f"Playback error: {error}")
+                log.error("[Guild %d] Playback error: %s", ctx.guild.id, error)
             asyncio.run_coroutine_threadsafe(self._play_next_async(ctx), self.bot.loop)
 
         ctx.voice_client.play(source, after=after_play)
@@ -787,7 +805,7 @@ class Music(commands.Cog):
 
         def after_play(error):
             if error:
-                print(f"Playback error: {error}")
+                log.error("[Guild %d] Playback error: %s", ctx.guild.id, error)
             asyncio.run_coroutine_threadsafe(self._play_next_async(ctx), self.bot.loop)
 
         ctx.voice_client.play(source, after=after_play)

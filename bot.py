@@ -1,3 +1,4 @@
+import logging
 import os
 import asyncio
 import discord
@@ -6,6 +7,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+log = logging.getLogger("bot")
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -15,12 +22,12 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    log.info("Logged in as %s (ID: %s)", bot.user, bot.user.id)
     try:
         synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} slash commands")
+        log.info("Synced %d slash commands", len(synced))
     except Exception as e:
-        print(f"Failed to sync commands: {e}")
+        log.error("Failed to sync commands: %s", e)
 
 
 async def main():

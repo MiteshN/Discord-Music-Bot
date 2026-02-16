@@ -1,7 +1,10 @@
 import asyncio
 import functools
+import logging
 import discord
 import yt_dlp
+
+log = logging.getLogger("bot.ytdl")
 
 YTDL_OPTIONS = {
     "format": "bestaudio[acodec=opus]/bestaudio/best",
@@ -53,6 +56,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
     @classmethod
     async def create_source(cls, search: str, *, loop: asyncio.AbstractEventLoop = None, volume: float = 0.5, seek_to: int = 0, audio_filter: str = "", cache_manager=None):
         loop = loop or asyncio.get_event_loop()
+        log.debug("Extracting info for: %s", search)
         partial = functools.partial(ytdl.extract_info, search, download=False)
         data = await loop.run_in_executor(None, partial)
 
@@ -70,6 +74,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
             if cached:
                 audio_path = cached
                 is_local = True
+                log.info("Using cached file for %s: %s", cache_key, cached)
             else:
                 downloaded = await cache_manager.download_and_cache(
                     cache_key,
@@ -80,6 +85,9 @@ class YTDLSource(discord.PCMVolumeTransformer):
                 if downloaded:
                     audio_path = downloaded
                     is_local = True
+
+        if not is_local:
+            log.info("Streaming from URL for: %s", data.get("title", search))
 
         before_options = FFMPEG_BEFORE_OPTIONS_LOCAL if is_local else FFMPEG_BEFORE_OPTIONS_STREAM
         if seek_to > 0:

@@ -1,11 +1,14 @@
 import asyncio
 import hashlib
+import logging
 import os
 import re
 import time
 
 import aiosqlite
 import yt_dlp
+
+log = logging.getLogger("bot.cache")
 
 YOUTUBE_ID_RE = re.compile(
     r"(?:youtube\.com/watch\?.*v=|youtu\.be/|youtube\.com/embed/|youtube\.com/shorts/)([A-Za-z0-9_-]{11})"
@@ -83,6 +86,7 @@ class CacheManager:
             )
             await self._db.commit()
             self.hits += 1
+            log.debug("Cache hit: %s -> %s", cache_key, row[0])
             return row[0]
         # DB record exists but file is gone — clean up
         if row:
@@ -118,7 +122,7 @@ class CacheManager:
             try:
                 info = await loop.run_in_executor(None, self._download_sync, opts, url)
             except Exception as e:
-                print(f"[Cache] Download failed for {cache_key}: {e}")
+                log.error("Download failed for %s: %s", cache_key, e)
                 return None
 
             if not info:
@@ -143,6 +147,7 @@ class CacheManager:
                 (cache_key, file_path, size_bytes, now, now),
             )
             await self._db.commit()
+            log.info("Cached %s (%.1f MB) -> %s", cache_key, size_bytes / (1024 * 1024), file_path)
             return file_path
 
     @staticmethod
@@ -173,6 +178,7 @@ class CacheManager:
             await self._db.execute("DELETE FROM cache_entries WHERE cache_key = ?", (key,))
             await self._db.commit()
             current_size -= size
+            log.info("Evicted %s (%.1f MB) to free space", key, size / (1024 * 1024))
 
     async def _cleanup(self):
         if not self._db:
