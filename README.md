@@ -9,12 +9,16 @@ A feature-rich Discord music bot built with Python that supports YouTube, Spotif
 - **Playback controls** — Play, pause, resume, skip, seek, and volume adjustment
 - **Spotify integration** — Automatically resolves Spotify tracks, playlists, and albums
 - **YouTube playlists** — Queue entire playlists at once
-- **Search** — Search YouTube and pick from top 5 results with reactions
+- **Audio filters** — Nightcore, vaporwave, bass boost, speed, tremolo, vibrato, 8D, and more via FFmpeg
+- **Search** — Search YouTube and pick from top 5 results with a dropdown menu
 - **Lyrics** — Fetch and display lyrics for the current track via Genius
-- **Now playing** — Track info with a live progress bar
+- **Now playing** — Track info with a live progress bar and playback buttons
+- **Play top** — Add songs to the front of the queue
+- **24/7 mode** — Keep the bot in the voice channel indefinitely
 - **DJ role** — Restrict destructive commands to users with a "DJ" role
 - **Vote skip** — Majority vote required to skip when 3+ users are in the channel
 - **Auto-disconnect** — Leaves the voice channel after 3 minutes of inactivity
+- **Voice channel status** — Displays the current track in the voice channel status
 - **Slash commands** — All commands work as both `!prefix` and `/slash` commands
 
 ## Commands
@@ -22,6 +26,7 @@ A feature-rich Discord music bot built with Python that supports YouTube, Spotif
 | Command | Description |
 |---------|-------------|
 | `!play <url/search>` | Play a song or add it to the queue |
+| `!playtop <url/search>` | Add a song to the top of the queue |
 | `!skip` | Skip the current track (vote skip with 3+ users) |
 | `!pause` | Pause playback |
 | `!resume` | Resume playback |
@@ -29,13 +34,22 @@ A feature-rich Discord music bot built with Python that supports YouTube, Spotif
 | `!disconnect` | Disconnect from the voice channel (aliases: `!dc`, `!leave`) |
 | `!queue` | Show the current queue |
 | `!volume <0-100>` | Adjust the volume |
-| `!nowplaying` | Show current track with progress bar |
+| `!nowplaying` | Show current track with progress bar and buttons |
 | `!loop <off/track/queue>` | Set loop mode |
 | `!shuffle` | Randomize the queue |
 | `!seek <timestamp>` | Jump to a position (e.g. `!seek 1:30`) |
 | `!remove <position>` | Remove a song from the queue |
 | `!search <query>` | Search YouTube and pick a result |
 | `!lyrics` | Show lyrics for the current track |
+| `!247` | Toggle 24/7 mode (stay in voice channel) |
+| `!nightcore` | Apply nightcore effect (speed up + pitch up) |
+| `!vaporwave` | Apply vaporwave effect (slow down + pitch down) |
+| `!bassboost` | Boost bass frequencies |
+| `!speed <0.5-2.0>` | Change playback speed without pitch change |
+| `!tremolo` | Apply tremolo effect (volume oscillation) |
+| `!vibrato` | Apply vibrato effect (pitch oscillation) |
+| `!8d` | Apply 8D audio effect (stereo rotation) |
+| `!cleareffect` | Remove all audio effects |
 
 ## Setup
 
