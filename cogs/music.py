@@ -1182,7 +1182,7 @@ class Music(commands.Cog):
                 "title": r.get("title", "Unknown"),
                 "url": r.get("webpage_url", ""),
                 "duration": r.get("duration", 0),
-                "thumbnail": r.get("thumbnail", ""),
+                "thumbnail": r.get("thumbnail") or (f"https://i.ytimg.com/vi/{r['id']}/mqdefault.jpg" if r.get("id") else ""),
             }
             for r in results
         ]
