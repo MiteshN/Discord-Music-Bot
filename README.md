@@ -21,7 +21,7 @@ A feature-rich Discord music bot built with Python that supports YouTube, Spotif
 - **Auto-disconnect** — Leaves the voice channel after 3 minutes of inactivity
 - **Voice channel status** — Displays the current track in the voice channel status
 - **Slash commands** — All commands work as both `!prefix` and `/slash` commands
-- **Web dashboard** — Browser-based control panel with real-time updates via WebSocket (optional, requires Discord OAuth2 setup)
+- **Web dashboard** — Spotify-like browser control panel with 3-panel layout, real-time WebSocket updates, and full playback control (optional, requires Discord OAuth2 setup)
 
 ## Commands
 
@@ -138,7 +138,7 @@ services:
       - DISCORD_CLIENT_ID=
       - DISCORD_CLIENT_SECRET=
       - DASHBOARD_SECRET_KEY=
-      - DASHBOARD_URL=http://localhost:8080
+      - DASHBOARD_URL=http://localhost:8080  # change to http://<your-server-ip>:8080 for remote access
       # - DASHBOARD_PORT=8080
 ```
 
@@ -189,17 +189,30 @@ The bot includes an optional web dashboard for controlling music playback from t
 
 ### Dashboard Features
 
+- **Spotify-like layout** — 3-panel grid with sidebar, main content area, and slide-out queue panel
+- **Bottom controller bar** — Track info, playback controls, seek bar, volume, and effects in a fixed bar
+- **Dark theme** — Pure black background with Discord accent colors and Material icons
 - Login with Discord OAuth2
 - Select any server where both you and the bot are members
 - View current track with album art and live seek bar
 - Play/pause, skip, stop, seek, volume, loop mode
 - Audio filter selection (nightcore, vaporwave, bass boost, etc.)
 - Queue management: view, remove, shuffle, drag-and-drop reorder
-- Search and add songs from the browser
+- Search and add songs from the header search bar
 - Guild settings (24/7 mode)
 - Real-time sync across multiple tabs and Discord commands
+- Responsive design — works on desktop, tablet, and mobile
 
 **Note:** The dashboard cannot start playback from scratch — the bot must already be in a voice channel (joined via Discord). Once in voice, all controls work from the browser.
+
+### Remote Access
+
+If running on a server and accessing from another device on your network:
+
+1. Set `DASHBOARD_URL` to `http://<server-ip>:8080` (e.g. `http://192.168.1.11:8080`)
+2. Add `http://<server-ip>:8080/callback` as an OAuth2 redirect URI in the [Discord Developer Portal](https://discord.com/developers/applications)
+3. Ensure port `8080` is open on the server's firewall
+4. The `ports: "8080:8080"` mapping in `docker-compose.yml` is required for Docker
 
 ## License
 

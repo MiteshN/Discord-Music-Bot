@@ -17,5 +17,5 @@ services:
       - DISCORD_CLIENT_ID=
       - DISCORD_CLIENT_SECRET=
       - DASHBOARD_SECRET_KEY=
-      - DASHBOARD_URL=http://localhost:8080
+      - DASHBOARD_URL=http://localhost:8080  # change to http://<your-server-ip>:8080 for remote access
       # - DASHBOARD_PORT=8080
