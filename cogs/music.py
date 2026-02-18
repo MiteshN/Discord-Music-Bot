@@ -350,10 +350,10 @@ class Music(commands.Cog):
         )
         embed.add_field(name="Progress", value=progress_text, inline=False)
         embed.add_field(name="Requested by", value=song.requester, inline=True)
+        if DASHBOARD_URL:
+            embed.add_field(name="🎛️ Web Dashboard", value=f"[Open Dashboard]({DASHBOARD_URL})", inline=True)
         if song.thumbnail:
             embed.set_thumbnail(url=song.thumbnail)
-        if DASHBOARD_URL:
-            embed.set_footer(text=f"Web Dashboard: {DASHBOARD_URL}")
         view = NowPlayingView(cog=self, ctx=ctx)
         await ctx.send(embed=embed, view=view)
 
@@ -636,24 +636,21 @@ class Music(commands.Cog):
                 inline=False,
             )
 
+        page_size = 10
         if gq.queue:
-            page_size = 10
             entries = []
             for i, song in enumerate(gq.queue[:page_size], 1):
                 entries.append(f"`{i}.` [{song.title}]({song.url or 'searching'}) | Requested by {song.requester}")
             embed.add_field(name="Up Next", value="\n".join(entries), inline=False)
             if len(gq.queue) > page_size:
-                footer = f"And {len(gq.queue) - page_size} more..."
-                if DASHBOARD_URL:
-                    footer += f" • Web Dashboard: {DASHBOARD_URL}"
-                embed.set_footer(text=footer)
+                embed.set_footer(text=f"And {len(gq.queue) - page_size} more...")
         else:
             embed.add_field(name="Up Next", value="Nothing in queue", inline=False)
 
         embed.add_field(name="Loop", value=gq.loop_mode.value, inline=True)
         embed.add_field(name="Volume", value=f"{int(gq.volume * 100)}%", inline=True)
-        if DASHBOARD_URL and len(gq.queue) <= page_size:
-            embed.set_footer(text=f"Web Dashboard: {DASHBOARD_URL}")
+        if DASHBOARD_URL:
+            embed.add_field(name="🎛️ Web Dashboard", value=f"[Open Dashboard]({DASHBOARD_URL})", inline=True)
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="volume", description="Set the volume (0-100)")
@@ -702,10 +699,10 @@ class Music(commands.Cog):
         embed.add_field(name="Requested by", value=gq.current.requester, inline=True)
         embed.add_field(name="Volume", value=f"{int(gq.volume * 100)}%", inline=True)
         embed.add_field(name="Loop", value=gq.loop_mode.value, inline=True)
+        if DASHBOARD_URL:
+            embed.add_field(name="🎛️ Web Dashboard", value=f"[Open Dashboard]({DASHBOARD_URL})", inline=True)
         if gq.current.thumbnail:
             embed.set_thumbnail(url=gq.current.thumbnail)
-        if DASHBOARD_URL:
-            embed.set_footer(text=f"Web Dashboard: {DASHBOARD_URL}")
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="loop", description="Set loop mode: off, track, or queue")
