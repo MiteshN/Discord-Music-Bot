@@ -96,8 +96,13 @@ cp .env.example .env
 2. Create a new application and go to the **Bot** tab
 3. Click **Reset Token** and copy it
 4. Enable **Message Content Intent** under Privileged Gateway Intents
-5. Under **OAuth2 > URL Generator**, select `bot` + `applications.commands` scopes, and grant `Connect`, `Speak`, `Send Messages`, `Embed Links`, `Add Reactions` permissions
-6. Use the generated URL to invite the bot to your server
+5. Under **OAuth2 > URL Generator**, select the following scopes and permissions, then use the generated URL to invite the bot:
+
+**Scopes:** `bot`, `applications.commands`
+
+**Permissions:**
+- Text: `View Channels`, `Send Messages`, `Send Messages in Threads`, `Embed Links`, `Read Message History`
+- Voice: `Connect`, `Speak`, `Manage Channels` (required for voice channel status)
 
 **Spotify Credentials (optional):**
 1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
