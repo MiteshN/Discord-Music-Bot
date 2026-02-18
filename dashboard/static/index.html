@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Music Bot Dashboard</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div id="app" class="app">
+        <header class="header">
+            <div class="header-left">
+                <h2>Music Bot</h2>
+                <select id="guild-select" class="guild-selector">
+                    <option value="">Select a server...</option>
+                </select>
+            </div>
+            <div class="header-right">
+                <div class="ws-status" id="ws-status" title="WebSocket disconnected"></div>
+                <span class="user-info" id="user-info"></span>
+                <a href="/logout" class="btn btn-sm btn-icon">Logout</a>
+            </div>
+        </header>
+
+        <div class="main-content" id="main-content">
+            <div class="no-guild" id="no-guild-msg">Select a server to get started</div>
+
+            <!-- Player card (hidden until guild selected) -->
+            <div id="player-section" style="display:none;">
+                <!-- Search -->
+                <div class="search-container">
+                    <input type="text" class="search-input" id="search-input"
+                           placeholder="Search for a song or paste a URL...">
+                    <div class="search-results" id="search-results"></div>
+                </div>
+
+                <!-- Player -->
+                <div class="player-card" id="player-card">
+                    <div id="player-idle" class="idle-state">
+                        <h3>Nothing playing</h3>
+                        <p>Search for a song above or use Discord to start playback</p>
+                    </div>
+                    <div id="player-active" style="display:none;">
+                        <div class="player-top">
+                            <img id="player-artwork" class="player-artwork" src="" alt="">
+                            <div class="player-info">
+                                <div class="player-title">
+                                    <a id="player-title-link" href="#" target="_blank"></a>
+                                </div>
+                                <div class="player-requester" id="player-requester"></div>
+                                <span class="player-badge" id="player-filter" style="display:none;"></span>
+                            </div>
+                        </div>
+                        <div class="seek-bar-container">
+                            <div class="seek-bar-times">
+                                <span id="elapsed-time">0:00</span>
+                                <span id="total-time">0:00</span>
+                            </div>
+                            <input type="range" class="seek-bar" id="seek-bar" min="0" max="100" value="0">
+                        </div>
+                        <div class="player-controls">
+                            <button class="control-btn" id="btn-shuffle" title="Shuffle queue">&#x1F500;</button>
+                            <button class="control-btn" id="btn-prev" title="Previous (not supported)">&#x23EE;</button>
+                            <button class="control-btn primary" id="btn-play-pause" title="Play/Pause">&#x23F8;</button>
+                            <button class="control-btn" id="btn-skip" title="Skip">&#x23ED;</button>
+                            <button class="control-btn" id="btn-stop" title="Stop">&#x23F9;</button>
+                        </div>
+                        <div class="player-secondary">
+                            <div class="volume-control">
+                                <span>&#x1F509;</span>
+                                <input type="range" class="volume-slider" id="volume-slider" min="0" max="100" value="50">
+                                <span id="volume-label">50%</span>
+                            </div>
+                            <select id="loop-select" class="loop-select">
+                                <option value="off">Loop: Off</option>
+                                <option value="track">Loop: Track</option>
+                                <option value="queue">Loop: Queue</option>
+                            </select>
+                            <select id="filter-select" class="filter-select">
+                                <option value="clear">No Effect</option>
+                                <option value="nightcore">Nightcore</option>
+                                <option value="vaporwave">Vaporwave</option>
+                                <option value="bassboost">Bass Boost</option>
+                                <option value="tremolo">Tremolo</option>
+                                <option value="vibrato">Vibrato</option>
+                                <option value="8d">8D Audio</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Queue -->
+                <div class="queue-card">
+                    <div class="queue-header">
+                        <h3>Queue <span id="queue-count"></span></h3>
+                        <div class="queue-actions">
+                            <button class="btn btn-sm btn-icon" id="btn-shuffle-queue" title="Shuffle">&#x1F500; Shuffle</button>
+                        </div>
+                    </div>
+                    <ul class="queue-list" id="queue-list">
+                        <li class="queue-empty" id="queue-empty">Queue is empty</li>
+                    </ul>
+                </div>
+
+                <!-- Settings -->
+                <div class="settings-card">
+                    <h3 style="margin-bottom: 12px;">Guild Settings</h3>
+                    <div class="settings-row">
+                        <span class="settings-label">24/7 Mode (stay in voice)</span>
+                        <label class="toggle">
+                            <input type="checkbox" id="setting-247">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/websocket.js"></script>
+    <script src="/static/js/player.js"></script>
+    <script src="/static/js/queue.js"></script>
+    <script src="/static/js/search.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

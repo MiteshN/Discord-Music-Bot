@@ -30,9 +30,34 @@ async def on_ready():
         log.error("Failed to sync commands: %s", e)
 
 
+async def start_dashboard():
+    """Start the Quart dashboard alongside the bot if OAuth2 credentials are configured."""
+    client_id = os.getenv("DISCORD_CLIENT_ID")
+    client_secret = os.getenv("DISCORD_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        log.info("Dashboard disabled: DISCORD_CLIENT_ID / DISCORD_CLIENT_SECRET not set")
+        return
+
+    from dashboard import create_app
+    from hypercorn.asyncio import serve
+    from hypercorn.config import Config
+
+    app = create_app(bot)
+
+    config = Config()
+    port = int(os.getenv("DASHBOARD_PORT", "8080"))
+    config.bind = [f"0.0.0.0:{port}"]
+    config.accesslog = "-"
+
+    log.info("Starting dashboard on port %d", port)
+    await serve(app, config, shutdown_trigger=lambda: asyncio.Future())
+
+
 async def main():
     async with bot:
         await bot.load_extension("cogs.music")
+        # Start dashboard as a background task (non-blocking)
+        asyncio.create_task(start_dashboard())
         await bot.start(os.getenv("DISCORD_BOT_TOKEN"))
 
 

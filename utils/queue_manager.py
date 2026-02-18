@@ -56,6 +56,13 @@ class GuildQueue:
             return self.queue.pop(index)
         return None
 
+    def move(self, from_idx: int, to_idx: int) -> bool:
+        if not (0 <= from_idx < len(self.queue) and 0 <= to_idx < len(self.queue)):
+            return False
+        song = self.queue.pop(from_idx)
+        self.queue.insert(to_idx, song)
+        return True
+
     def shuffle(self):
         random.shuffle(self.queue)
 

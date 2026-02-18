@@ -2,6 +2,8 @@ services:
   bot:
     image: ghcr.io/miteshn/discord-music-bot:latest
     restart: always
+    ports:
+      - "8080:8080"
     volumes:
       - ./cache:/app/cache
     environment:
@@ -11,3 +13,9 @@ services:
       - GENIUS_API_TOKEN=
       # - CACHE_LIMIT_MB=2048
       # - MAX_CACHE_DURATION=1800
+      # Dashboard (optional - set these to enable the web dashboard)
+      - DISCORD_CLIENT_ID=
+      - DISCORD_CLIENT_SECRET=
+      - DASHBOARD_SECRET_KEY=
+      - DASHBOARD_URL=http://localhost:8080
+      # - DASHBOARD_PORT=8080

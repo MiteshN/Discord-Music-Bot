@@ -21,6 +21,7 @@ A feature-rich Discord music bot built with Python that supports YouTube, Spotif
 - **Auto-disconnect** — Leaves the voice channel after 3 minutes of inactivity
 - **Voice channel status** — Displays the current track in the voice channel status
 - **Slash commands** — All commands work as both `!prefix` and `/slash` commands
+- **Web dashboard** — Browser-based control panel with real-time updates via WebSocket (optional, requires Discord OAuth2 setup)
 
 ## Commands
 
@@ -122,6 +123,8 @@ services:
   bot:
     image: ghcr.io/miteshn/discord-music-bot:latest
     restart: always
+    ports:
+      - "8080:8080"
     volumes:
       - ./cache:/app/cache
     environment:
@@ -131,6 +134,12 @@ services:
       - GENIUS_API_TOKEN=
       # - CACHE_LIMIT_MB=2048
       # - MAX_CACHE_DURATION=1800
+      # Web Dashboard (optional)
+      - DISCORD_CLIENT_ID=
+      - DISCORD_CLIENT_SECRET=
+      - DASHBOARD_SECRET_KEY=
+      - DASHBOARD_URL=http://localhost:8080
+      # - DASHBOARD_PORT=8080
 ```
 
 Fill in your tokens after the `=` signs, then:
@@ -156,6 +165,41 @@ The volume mount (`./cache:/app/cache`) in Docker Compose ensures the cache pers
 ## DJ Role
 
 If a role named **DJ** exists in your server, only users with that role (or admins) can use: `skip`, `stop`, `volume`, `remove`, `shuffle`, `clearcache`. If no DJ role exists, all commands are unrestricted.
+
+## Web Dashboard
+
+The bot includes an optional web dashboard for controlling music playback from the browser. It runs in-process alongside the bot and provides real-time updates via WebSocket.
+
+### Dashboard Setup
+
+1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) and select your bot's application
+2. Go to **OAuth2** and copy the **Client ID** and **Client Secret**
+3. Under **Redirects**, add your dashboard callback URL (e.g. `http://localhost:8080/callback`)
+4. Set the environment variables:
+
+| Variable | Required | Description |
+|---|---|---|
+| `DISCORD_CLIENT_ID` | Yes | Bot's OAuth2 client ID |
+| `DISCORD_CLIENT_SECRET` | Yes | OAuth2 client secret |
+| `DASHBOARD_SECRET_KEY` | Recommended | Random string for session signing (regenerated on restart if unset) |
+| `DASHBOARD_URL` | For production | Public base URL (default: `http://localhost:8080`) — must match the redirect URI host |
+| `DASHBOARD_PORT` | No | Web server port (default: `8080`) |
+
+5. Restart the bot — the dashboard will be available at `http://localhost:8080`
+
+### Dashboard Features
+
+- Login with Discord OAuth2
+- Select any server where both you and the bot are members
+- View current track with album art and live seek bar
+- Play/pause, skip, stop, seek, volume, loop mode
+- Audio filter selection (nightcore, vaporwave, bass boost, etc.)
+- Queue management: view, remove, shuffle, drag-and-drop reorder
+- Search and add songs from the browser
+- Guild settings (24/7 mode)
+- Real-time sync across multiple tabs and Discord commands
+
+**Note:** The dashboard cannot start playback from scratch — the bot must already be in a voice channel (joined via Discord). Once in voice, all controls work from the browser.
 
 ## License
 

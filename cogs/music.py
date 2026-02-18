@@ -175,6 +175,16 @@ class SearchSelectView(discord.ui.View):
             pass
 
 
+FILTER_MAP = {
+    "nightcore": ("asetrate=48000*1.25,aresample=48000,atempo=1.0", "Nightcore"),
+    "vaporwave": ("asetrate=48000*0.8,aresample=48000,atempo=1.0", "Vaporwave"),
+    "bassboost": ("bass=g=10", "Bass Boost"),
+    "tremolo": ("tremolo=f=4:d=0.7", "Tremolo"),
+    "vibrato": ("vibrato=f=4:d=0.5", "Vibrato"),
+    "8d": ("apulsator=hz=0.15", "8D"),
+}
+
+
 class Music(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -229,6 +239,48 @@ class Music(commands.Cog):
             return True
         return dj_role in ctx.author.roles
 
+    def _emit_event(self, guild_id: int, event_type: str, data: dict | None = None):
+        """Push an event to the dashboard EventBus. No-op if dashboard not running."""
+        event_bus = getattr(self.bot, "_dashboard_event_bus", None)
+        if not event_bus:
+            return
+        if data is None:
+            data = self._build_player_state(guild_id)
+        event_bus.publish(guild_id, event_type, data)
+
+    def _build_player_state(self, guild_id: int) -> dict:
+        gq = self.queue_manager.get(guild_id)
+        guild = self.bot.get_guild(guild_id)
+        vc = guild.voice_client if guild else None
+        current = None
+        if gq.current:
+            current = {
+                "title": gq.current.title,
+                "url": gq.current.url,
+                "duration": gq.current.duration,
+                "thumbnail": gq.current.thumbnail,
+                "requester": gq.current.requester,
+            }
+        elapsed = 0
+        if gq.start_time and gq.current:
+            elapsed = time.time() - gq.start_time
+        return {
+            "current": current,
+            "elapsed": elapsed,
+            "paused": vc.is_paused() if vc else False,
+            "playing": vc.is_playing() if vc else False,
+            "volume": int(gq.volume * 100),
+            "loop": gq.loop_mode.value,
+            "filter": gq.audio_filter_name,
+            "queue": [
+                {"title": s.title, "url": s.url, "duration": s.duration,
+                 "thumbnail": s.thumbnail, "requester": s.requester}
+                for s in gq.queue
+            ],
+            "in_voice": vc is not None and vc.is_connected(),
+            "timestamp": time.time(),
+        }
+
     async def _ensure_settings(self, guild_id: int):
         if guild_id in self._loaded_guilds:
             return
@@ -274,6 +326,8 @@ class Music(commands.Cog):
             asyncio.run_coroutine_threadsafe(self._play_next_async(ctx), self.bot.loop)
 
         ctx.voice_client.play(source, after=after_play)
+        self._emit_event(ctx.guild.id, "player_update")
+        self._emit_event(ctx.guild.id, "queue_update")
 
         # Set voice channel status
         vc_status = f"🎵 {song.title}"
@@ -310,6 +364,7 @@ class Music(commands.Cog):
             await self._play_song(ctx, next_song)
         else:
             log.info("[Guild %d] Queue empty, playback finished", ctx.guild.id)
+            self._emit_event(ctx.guild.id, "player_update")
             if ctx.voice_client:
                 await self._set_vc_status(ctx.voice_client, None)
 
@@ -456,6 +511,7 @@ class Music(commands.Cog):
         gq.add(song)
 
         if vc.is_playing() or vc.is_paused():
+            self._emit_event(ctx.guild.id, "queue_update")
             await ctx.send(f"Added **{query}** to the queue (position {len(gq.queue)}).")
         else:
             next_song = gq.next()
@@ -511,6 +567,7 @@ class Music(commands.Cog):
         should_skip, votes, needed = self._vote_skip_check(ctx)
         if should_skip:
             ctx.voice_client.stop()
+            self._emit_event(ctx.guild.id, "player_update")
             await ctx.send("Skipped.")
         else:
             await ctx.send(f"Vote skip: **{votes}/{needed}** votes needed.")
@@ -519,6 +576,7 @@ class Music(commands.Cog):
     async def pause(self, ctx: commands.Context):
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.pause()
+            self._emit_event(ctx.guild.id, "player_update")
             await ctx.send("Paused.")
         else:
             await ctx.send("Nothing is playing.")
@@ -527,6 +585,7 @@ class Music(commands.Cog):
     async def resume(self, ctx: commands.Context):
         if ctx.voice_client and ctx.voice_client.is_paused():
             ctx.voice_client.resume()
+            self._emit_event(ctx.guild.id, "player_update")
             await ctx.send("Resumed.")
         else:
             await ctx.send("Nothing is paused.")
@@ -542,6 +601,7 @@ class Music(commands.Cog):
             await self._set_vc_status(ctx.voice_client, None)
             ctx.voice_client.stop()
             await ctx.voice_client.disconnect()
+        self._emit_event(ctx.guild.id, "disconnected")
         await ctx.send("Stopped and disconnected.")
 
     @commands.hybrid_command(name="disconnect", aliases=["dc", "leave"], description="Disconnect from the voice channel")
@@ -554,6 +614,7 @@ class Music(commands.Cog):
         await self._set_vc_status(ctx.voice_client, None)
         ctx.voice_client.stop()
         await ctx.voice_client.disconnect()
+        self._emit_event(ctx.guild.id, "disconnected")
         await ctx.send("Disconnected.")
 
     @commands.hybrid_command(name="queue", description="Show the current queue")
@@ -600,6 +661,7 @@ class Music(commands.Cog):
         if ctx.voice_client and ctx.voice_client.source:
             ctx.voice_client.source.volume = gq.volume
         await self.settings.save(ctx.guild.id, gq.volume, gq.twenty_four_seven)
+        self._emit_event(ctx.guild.id, "volume_update", {"volume": vol})
         await ctx.send(f"Volume set to **{vol}%**.")
 
     @commands.hybrid_command(name="nowplaying", aliases=["np"], description="Show the currently playing track")
@@ -645,6 +707,7 @@ class Music(commands.Cog):
             return
         gq = self.queue_manager.get(ctx.guild.id)
         gq.loop_mode = loop_mode
+        self._emit_event(ctx.guild.id, "loop_update", {"loop": mode})
         await ctx.send(f"Loop mode set to **{mode}**.")
 
     @commands.hybrid_command(name="shuffle", description="Shuffle the queue")
@@ -657,6 +720,7 @@ class Music(commands.Cog):
             await ctx.send("The queue is empty.")
             return
         gq.shuffle()
+        self._emit_event(ctx.guild.id, "queue_update")
         await ctx.send("Queue shuffled.")
 
     @commands.hybrid_command(name="seek", description="Seek to a position (e.g. 1:30)")
@@ -704,6 +768,7 @@ class Music(commands.Cog):
             asyncio.run_coroutine_threadsafe(self._play_next_async(ctx), self.bot.loop)
 
         ctx.voice_client.play(source, after=after_play)
+        self._emit_event(ctx.guild.id, "player_update")
         await ctx.send(f"Seeked to **{timestamp}**.")
 
     @commands.hybrid_command(name="remove", description="Remove a song from the queue by position")
@@ -714,6 +779,7 @@ class Music(commands.Cog):
         gq = self.queue_manager.get(ctx.guild.id)
         removed = gq.remove(position - 1)  # 1-indexed for users
         if removed:
+            self._emit_event(ctx.guild.id, "queue_update")
             await ctx.send(f"Removed **{removed.title}** from the queue.")
         else:
             await ctx.send("Invalid position.")
@@ -809,6 +875,7 @@ class Music(commands.Cog):
             asyncio.run_coroutine_threadsafe(self._play_next_async(ctx), self.bot.loop)
 
         ctx.voice_client.play(source, after=after_play)
+        self._emit_event(ctx.guild.id, "player_update")
 
     @commands.hybrid_command(name="nightcore", description="Apply nightcore effect (speed up + pitch up)")
     async def nightcore(self, ctx: commands.Context):
@@ -936,6 +1003,319 @@ class Music(commands.Cog):
         await self.settings.save(ctx.guild.id, gq.volume, gq.twenty_four_seven)
         state = "enabled" if gq.twenty_four_seven else "disabled"
         await ctx.send(f"24/7 mode **{state}**. {'I will stay in the voice channel.' if gq.twenty_four_seven else 'I will auto-disconnect after inactivity.'}")
+
+
+    # --- Dashboard API methods (no ctx dependency) ---
+
+    async def api_pause_resume(self, guild_id: int) -> dict:
+        guild = self.bot.get_guild(guild_id)
+        if not guild or not guild.voice_client:
+            return {"error": "Not in a voice channel"}
+        vc = guild.voice_client
+        if vc.is_playing():
+            vc.pause()
+            self._emit_event(guild_id, "player_update")
+            return {"status": "paused"}
+        elif vc.is_paused():
+            vc.resume()
+            self._emit_event(guild_id, "player_update")
+            return {"status": "resumed"}
+        return {"error": "Nothing is playing"}
+
+    async def api_skip(self, guild_id: int) -> dict:
+        guild = self.bot.get_guild(guild_id)
+        if not guild or not guild.voice_client:
+            return {"error": "Not in a voice channel"}
+        vc = guild.voice_client
+        if not vc.is_playing() and not vc.is_paused():
+            return {"error": "Nothing is playing"}
+        vc.stop()
+        return {"status": "skipped"}
+
+    async def api_stop(self, guild_id: int) -> dict:
+        guild = self.bot.get_guild(guild_id)
+        if not guild or not guild.voice_client:
+            return {"error": "Not in a voice channel"}
+        vc = guild.voice_client
+        gq = self.queue_manager.get(guild_id)
+        gq.clear()
+        await self._set_vc_status(vc, None)
+        vc.stop()
+        await vc.disconnect()
+        self._emit_event(guild_id, "disconnected")
+        return {"status": "stopped"}
+
+    async def api_seek(self, guild_id: int, position: int) -> dict:
+        guild = self.bot.get_guild(guild_id)
+        if not guild or not guild.voice_client:
+            return {"error": "Not in a voice channel"}
+        vc = guild.voice_client
+        if not vc.is_playing() and not vc.is_paused():
+            return {"error": "Nothing is playing"}
+        gq = self.queue_manager.get(guild_id)
+        if not gq.current:
+            return {"error": "Nothing is playing"}
+        if gq.current.duration and position > gq.current.duration:
+            return {"error": "Position exceeds track duration"}
+
+        self._restarting.add(guild_id)
+        vc.stop()
+        try:
+            source = await YTDLSource.create_source(
+                gq.current.url or gq.current.search_query,
+                loop=self.bot.loop,
+                volume=gq.volume,
+                seek_to=position,
+                audio_filter=gq.audio_filter,
+                cache_manager=self.cache_manager,
+            )
+        except Exception as e:
+            self._restarting.discard(guild_id)
+            return {"error": str(e)}
+
+        gq.start_time = time.time() - position
+        self._restarting.discard(guild_id)
+
+        def after_play(error):
+            if error:
+                log.error("[Guild %d] Playback error: %s", guild_id, error)
+            # Find the ctx-less way to advance queue
+            asyncio.run_coroutine_threadsafe(self._api_play_next(guild_id), self.bot.loop)
+
+        vc.play(source, after=after_play)
+        self._emit_event(guild_id, "player_update")
+        return {"status": "seeked", "position": position}
+
+    async def api_volume(self, guild_id: int, vol: int) -> dict:
+        if not 0 <= vol <= 100:
+            return {"error": "Volume must be between 0 and 100"}
+        await self._ensure_settings(guild_id)
+        gq = self.queue_manager.get(guild_id)
+        gq.volume = vol / 100
+        guild = self.bot.get_guild(guild_id)
+        if guild and guild.voice_client and guild.voice_client.source:
+            guild.voice_client.source.volume = gq.volume
+        await self.settings.save(guild_id, gq.volume, gq.twenty_four_seven)
+        self._emit_event(guild_id, "volume_update", {"volume": vol})
+        return {"status": "ok", "volume": vol}
+
+    async def api_loop(self, guild_id: int, mode: str) -> dict:
+        try:
+            loop_mode = LoopMode(mode)
+        except ValueError:
+            return {"error": "Invalid loop mode"}
+        gq = self.queue_manager.get(guild_id)
+        gq.loop_mode = loop_mode
+        self._emit_event(guild_id, "loop_update", {"loop": mode})
+        return {"status": "ok", "loop": mode}
+
+    async def api_shuffle(self, guild_id: int) -> dict:
+        gq = self.queue_manager.get(guild_id)
+        if not gq.queue:
+            return {"error": "Queue is empty"}
+        gq.shuffle()
+        self._emit_event(guild_id, "queue_update")
+        return {"status": "shuffled"}
+
+    async def api_remove(self, guild_id: int, index: int) -> dict:
+        gq = self.queue_manager.get(guild_id)
+        removed = gq.remove(index)
+        if removed:
+            self._emit_event(guild_id, "queue_update")
+            return {"status": "removed", "title": removed.title}
+        return {"error": "Invalid index"}
+
+    async def api_move(self, guild_id: int, from_idx: int, to_idx: int) -> dict:
+        gq = self.queue_manager.get(guild_id)
+        if gq.move(from_idx, to_idx):
+            self._emit_event(guild_id, "queue_update")
+            return {"status": "moved"}
+        return {"error": "Invalid indices"}
+
+    async def api_add_to_queue(self, guild_id: int, query: str, requester: str, top: bool = False) -> dict:
+        guild = self.bot.get_guild(guild_id)
+        if not guild or not guild.voice_client:
+            return {"error": "Bot is not in a voice channel. Use Discord to start playback first."}
+
+        gq = self.queue_manager.get(guild_id)
+
+        # Spotify handling
+        if SpotifyResolver.is_spotify_url(query):
+            searches = await self.bot.loop.run_in_executor(None, self.spotify.resolve, query)
+            if not searches:
+                return {"error": "Could not resolve Spotify URL"}
+            for s in (reversed(searches) if top else searches):
+                song = Song(title=s, url="", search_query=s, requester=requester)
+                if top:
+                    gq.add_top(song)
+                else:
+                    gq.add(song)
+            self._emit_event(guild_id, "queue_update")
+
+            vc = guild.voice_client
+            if not vc.is_playing() and not vc.is_paused():
+                next_song = gq.next()
+                if next_song:
+                    await self._api_play_song(guild_id, next_song)
+
+            return {"status": "added", "count": len(searches)}
+
+        song = Song(title=query, url=query, search_query=query, requester=requester)
+        if top:
+            gq.add_top(song)
+        else:
+            gq.add(song)
+        self._emit_event(guild_id, "queue_update")
+
+        vc = guild.voice_client
+        if not vc.is_playing() and not vc.is_paused():
+            next_song = gq.next()
+            if next_song:
+                await self._api_play_song(guild_id, next_song)
+
+        return {"status": "added", "count": 1}
+
+    async def api_search(self, query: str) -> list[dict]:
+        results = await YTDLSource.search_results(query, count=10, loop=self.bot.loop)
+        return [
+            {
+                "title": r.get("title", "Unknown"),
+                "url": r.get("webpage_url", ""),
+                "duration": r.get("duration", 0),
+                "thumbnail": r.get("thumbnail", ""),
+            }
+            for r in results
+        ]
+
+    async def api_filter(self, guild_id: int, filter_name: str) -> dict:
+        guild = self.bot.get_guild(guild_id)
+        if not guild or not guild.voice_client:
+            return {"error": "Not in a voice channel"}
+        vc = guild.voice_client
+        if not vc.is_playing() and not vc.is_paused():
+            return {"error": "Nothing is playing"}
+
+        gq = self.queue_manager.get(guild_id)
+
+        if filter_name == "clear":
+            gq.audio_filter = ""
+            gq.audio_filter_name = ""
+        elif filter_name in FILTER_MAP:
+            gq.audio_filter, gq.audio_filter_name = FILTER_MAP[filter_name]
+        elif filter_name.startswith("speed:"):
+            try:
+                rate = float(filter_name.split(":")[1])
+                if not 0.5 <= rate <= 2.0:
+                    return {"error": "Speed must be between 0.5 and 2.0"}
+                gq.audio_filter = f"atempo={rate}"
+                gq.audio_filter_name = f"Speed {rate}x"
+            except (ValueError, IndexError):
+                return {"error": "Invalid speed value"}
+        else:
+            return {"error": f"Unknown filter: {filter_name}"}
+
+        # Restart playback with new filter
+        elapsed = int(time.time() - gq.start_time) if gq.start_time else 0
+        self._restarting.add(guild_id)
+        vc.stop()
+        try:
+            source = await YTDLSource.create_source(
+                gq.current.url or gq.current.search_query,
+                loop=self.bot.loop,
+                volume=gq.volume,
+                seek_to=elapsed,
+                audio_filter=gq.audio_filter,
+                cache_manager=self.cache_manager,
+            )
+        except Exception as e:
+            self._restarting.discard(guild_id)
+            return {"error": str(e)}
+
+        gq.start_time = time.time() - elapsed
+        self._restarting.discard(guild_id)
+
+        def after_play(error):
+            if error:
+                log.error("[Guild %d] Playback error: %s", guild_id, error)
+            asyncio.run_coroutine_threadsafe(self._api_play_next(guild_id), self.bot.loop)
+
+        vc.play(source, after=after_play)
+        self._emit_event(guild_id, "player_update")
+        return {"status": "ok", "filter": gq.audio_filter_name or "none"}
+
+    async def api_update_settings(self, guild_id: int, data: dict) -> dict:
+        await self._ensure_settings(guild_id)
+        gq = self.queue_manager.get(guild_id)
+        if "volume" in data:
+            vol = data["volume"]
+            if 0 <= vol <= 100:
+                gq.volume = vol / 100
+                guild = self.bot.get_guild(guild_id)
+                if guild and guild.voice_client and guild.voice_client.source:
+                    guild.voice_client.source.volume = gq.volume
+        if "twenty_four_seven" in data:
+            gq.twenty_four_seven = bool(data["twenty_four_seven"])
+        await self.settings.save(guild_id, gq.volume, gq.twenty_four_seven)
+        return {"status": "ok"}
+
+    async def _api_play_song(self, guild_id: int, song: Song):
+        """Play a song without ctx (for dashboard API calls)."""
+        await self._ensure_settings(guild_id)
+        gq = self.queue_manager.get(guild_id)
+        gq.current = song
+        gq.skip_votes.clear()
+
+        guild = self.bot.get_guild(guild_id)
+        if not guild or not guild.voice_client:
+            return
+
+        vc = guild.voice_client
+        try:
+            source = await YTDLSource.create_source(
+                song.url or song.search_query,
+                loop=self.bot.loop,
+                volume=gq.volume,
+                audio_filter=gq.audio_filter,
+                cache_manager=self.cache_manager,
+            )
+        except Exception as e:
+            log.error("[Guild %d] API play failed for '%s': %s", guild_id, song.title, e)
+            await self._api_play_next(guild_id)
+            return
+
+        song.title = source.title
+        song.duration = source.duration
+        song.thumbnail = source.thumbnail
+        song.url = source.webpage_url
+        gq.start_time = time.time()
+
+        def after_play(error):
+            if error:
+                log.error("[Guild %d] Playback error: %s", guild_id, error)
+            asyncio.run_coroutine_threadsafe(self._api_play_next(guild_id), self.bot.loop)
+
+        vc.play(source, after=after_play)
+        self._emit_event(guild_id, "player_update")
+        self._emit_event(guild_id, "queue_update")
+
+        vc_status = f"🎵 {song.title}"
+        if len(vc_status) > 500:
+            vc_status = vc_status[:497] + "..."
+        await self._set_vc_status(vc, vc_status)
+
+    async def _api_play_next(self, guild_id: int):
+        """Advance to next song without ctx (for dashboard-initiated playback)."""
+        if guild_id in self._restarting:
+            return
+        gq = self.queue_manager.get(guild_id)
+        next_song = gq.next()
+        if next_song:
+            await self._api_play_song(guild_id, next_song)
+        else:
+            self._emit_event(guild_id, "player_update")
+            guild = self.bot.get_guild(guild_id)
+            if guild and guild.voice_client:
+                await self._set_vc_status(guild.voice_client, None)
 
 
 async def setup(bot: commands.Bot):
