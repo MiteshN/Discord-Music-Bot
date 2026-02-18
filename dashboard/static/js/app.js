@@ -73,7 +73,14 @@ const App = {
 
             const icon = document.createElement("div");
             icon.className = "guild-icon";
-            icon.textContent = g.name.charAt(0).toUpperCase();
+            if (g.icon) {
+                const img = document.createElement("img");
+                img.src = g.icon;
+                img.alt = "";
+                icon.appendChild(img);
+            } else {
+                icon.textContent = g.name.charAt(0).toUpperCase();
+            }
 
             const name = document.createElement("span");
             name.textContent = g.name;
@@ -144,7 +151,7 @@ const App = {
         document.querySelectorAll(".page").forEach(el => { el.style.display = "none"; });
         if (this.guildId) {
             const pageEl = document.getElementById(`page-${page}`);
-            if (pageEl) pageEl.style.display = "block";
+            if (pageEl) pageEl.style.display = "flex";
         }
     },
 

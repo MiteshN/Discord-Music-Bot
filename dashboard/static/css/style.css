@@ -201,6 +201,13 @@ body {
     font-weight: 700;
     flex-shrink: 0;
     color: var(--text-secondary);
+    overflow: hidden;
+}
+
+.guild-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }
 
 .nav-list {
@@ -244,6 +251,14 @@ body {
     background: var(--bg-dark);
     overflow-y: auto;
     padding: 32px;
+    display: flex;
+    flex-direction: column;
+}
+
+.page {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
 }
 
 .page-center {
@@ -251,7 +266,7 @@ body {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    height: 100%;
+    flex: 1;
     gap: 12px;
     text-align: center;
     color: var(--text-muted);
@@ -668,7 +683,7 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 4px;
+    gap: 8px;
     max-width: 600px;
     margin: 0 auto;
 }
@@ -692,7 +707,8 @@ body {
     color: var(--primary);
 }
 
-.ctrl-btn-primary {
+.ctrl-btn-primary,
+.icon-btn.ctrl-btn-primary {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -706,17 +722,23 @@ body {
     transition: transform 0.1s, background 0.15s;
 }
 
-.ctrl-btn-primary:hover {
+.ctrl-btn-primary:hover,
+.icon-btn.ctrl-btn-primary:hover {
     transform: scale(1.05);
     background: white;
+    color: var(--bg-dark);
 }
 
-.ctrl-btn-primary:active {
+.ctrl-btn-primary:active,
+.icon-btn.ctrl-btn-primary:active {
     transform: scale(0.95);
 }
 
-.ctrl-btn-primary .material-symbols-outlined {
+.ctrl-btn-primary .material-symbols-outlined,
+.icon-btn.ctrl-btn-primary .material-symbols-outlined {
     font-size: 22px;
+    line-height: 1;
+    display: block;
 }
 
 /* Seek bar */

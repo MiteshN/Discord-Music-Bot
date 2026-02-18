@@ -203,9 +203,16 @@ const Player = {
         document.getElementById("ctrl-requester").textContent = "";
         document.getElementById("play-pause-icon").textContent = "play_arrow";
 
+        // Disable playback controls
+        ["btn-play-pause", "btn-skip", "btn-stop", "btn-prev"].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.disabled = true;
+        });
+
         const seekBar = document.getElementById("seek-bar");
         seekBar.value = 0;
         seekBar.max = 100;
+        seekBar.disabled = true;
         this._updateRangeFill(seekBar);
         document.getElementById("elapsed-time").textContent = "0:00";
         document.getElementById("total-time").textContent = "0:00";
@@ -217,6 +224,13 @@ const Player = {
     showActive() {
         document.getElementById("player-idle").style.display = "none";
         document.getElementById("player-active").style.display = "flex";
+        document.getElementById("seek-bar").disabled = false;
+
+        // Re-enable playback controls
+        ["btn-play-pause", "btn-skip", "btn-stop", "btn-prev"].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.disabled = false;
+        });
     },
 
     _interpolate() {
