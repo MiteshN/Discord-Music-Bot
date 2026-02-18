@@ -401,6 +401,7 @@ class Music(commands.Cog):
                     log.info("[Guild %d] Auto-disconnecting after 3min idle", vc.guild.id)
                     gq.clear()
                     self.queue_manager.remove(vc.guild.id)
+                    self._loaded_guilds.discard(vc.guild.id)
                     await self._set_vc_status(vc, None)
                     await vc.disconnect()
                 elif not gq.current and not gq.start_time:
