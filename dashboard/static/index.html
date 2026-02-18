@@ -4,115 +4,204 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Music Bot Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
     <div id="app" class="app">
-        <header class="header">
+        <!-- Header -->
+        <header class="header-container">
             <div class="header-left">
-                <h2>Music Bot</h2>
-                <select id="guild-select" class="guild-selector">
-                    <option value="">Select a server...</option>
-                </select>
+                <button class="icon-btn hamburger-btn" id="hamburger-btn" title="Toggle menu">
+                    <span class="material-symbols-outlined">menu</span>
+                </button>
+                <span class="brand">Music Bot</span>
+            </div>
+            <div class="header-search" id="header-search">
+                <span class="material-symbols-outlined search-icon">search</span>
+                <input type="text" class="search-input" id="search-input"
+                       placeholder="Search for a song or paste a URL..." autocomplete="off">
+                <div class="search-results" id="search-results"></div>
             </div>
             <div class="header-right">
                 <div class="ws-status" id="ws-status" title="WebSocket disconnected"></div>
                 <span class="user-info" id="user-info"></span>
-                <a href="/logout" class="btn btn-sm btn-icon">Logout</a>
+                <a href="/logout" class="icon-btn" title="Logout">
+                    <span class="material-symbols-outlined">logout</span>
+                </a>
             </div>
         </header>
 
-        <div class="main-content" id="main-content">
-            <div class="no-guild" id="no-guild-msg">Select a server to get started</div>
+        <!-- Sidebar -->
+        <nav class="menu-container" id="menu-container">
+            <div class="sidebar-section">
+                <div class="sidebar-heading">Servers</div>
+                <ul class="guild-list" id="guild-list"></ul>
+            </div>
+            <div class="sidebar-section">
+                <div class="sidebar-heading">Navigation</div>
+                <ul class="nav-list">
+                    <li class="nav-item active" data-page="home" id="nav-home">
+                        <span class="material-symbols-outlined">home</span>
+                        <span>Home</span>
+                    </li>
+                    <li class="nav-item" data-page="settings" id="nav-settings">
+                        <span class="material-symbols-outlined">settings</span>
+                        <span>Settings</span>
+                    </li>
+                </ul>
+            </div>
+        </nav>
 
-            <!-- Player card (hidden until guild selected) -->
-            <div id="player-section" style="display:none;">
-                <!-- Search -->
-                <div class="search-container">
-                    <input type="text" class="search-input" id="search-input"
-                           placeholder="Search for a song or paste a URL...">
-                    <div class="search-results" id="search-results"></div>
+        <!-- Sidebar overlay for mobile -->
+        <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+        <!-- Main content -->
+        <main class="main-container" id="main-container">
+            <!-- No guild selected state -->
+            <div class="page-center" id="no-guild-msg">
+                <span class="material-symbols-outlined" style="font-size:64px;color:var(--text-muted);">library_music</span>
+                <h2>Select a server</h2>
+                <p>Choose a server from the sidebar to get started</p>
+            </div>
+
+            <!-- Home page (player info when guild selected) -->
+            <div id="page-home" class="page" style="display:none;">
+                <!-- Idle state -->
+                <div id="player-idle" class="page-center">
+                    <span class="material-symbols-outlined" style="font-size:64px;color:var(--text-muted);">music_off</span>
+                    <h2>Nothing playing</h2>
+                    <p>Search for a song above or use Discord to start playback</p>
                 </div>
 
-                <!-- Player -->
-                <div class="player-card" id="player-card">
-                    <div id="player-idle" class="idle-state">
-                        <h3>Nothing playing</h3>
-                        <p>Search for a song above or use Discord to start playback</p>
-                    </div>
-                    <div id="player-active" style="display:none;">
-                        <div class="player-top">
-                            <img id="player-artwork" class="player-artwork" src="" alt="">
-                            <div class="player-info">
-                                <div class="player-title">
-                                    <a id="player-title-link" href="#" target="_blank"></a>
-                                </div>
-                                <div class="player-requester" id="player-requester"></div>
-                                <span class="player-badge" id="player-filter" style="display:none;"></span>
-                            </div>
-                        </div>
-                        <div class="seek-bar-container">
-                            <div class="seek-bar-times">
-                                <span id="elapsed-time">0:00</span>
-                                <span id="total-time">0:00</span>
-                            </div>
-                            <input type="range" class="seek-bar" id="seek-bar" min="0" max="100" value="0">
-                        </div>
-                        <div class="player-controls">
-                            <button class="control-btn" id="btn-shuffle" title="Shuffle queue">&#x1F500;</button>
-                            <button class="control-btn" id="btn-prev" title="Previous (not supported)">&#x23EE;</button>
-                            <button class="control-btn primary" id="btn-play-pause" title="Play/Pause">&#x23F8;</button>
-                            <button class="control-btn" id="btn-skip" title="Skip">&#x23ED;</button>
-                            <button class="control-btn" id="btn-stop" title="Stop">&#x23F9;</button>
-                        </div>
-                        <div class="player-secondary">
-                            <div class="volume-control">
-                                <span>&#x1F509;</span>
-                                <input type="range" class="volume-slider" id="volume-slider" min="0" max="100" value="50">
-                                <span id="volume-label">50%</span>
-                            </div>
-                            <select id="loop-select" class="loop-select">
-                                <option value="off">Loop: Off</option>
-                                <option value="track">Loop: Track</option>
-                                <option value="queue">Loop: Queue</option>
-                            </select>
-                            <select id="filter-select" class="filter-select">
-                                <option value="clear">No Effect</option>
-                                <option value="nightcore">Nightcore</option>
-                                <option value="vaporwave">Vaporwave</option>
-                                <option value="bassboost">Bass Boost</option>
-                                <option value="tremolo">Tremolo</option>
-                                <option value="vibrato">Vibrato</option>
-                                <option value="8d">8D Audio</option>
-                            </select>
-                        </div>
+                <!-- Active state: now playing display in main area -->
+                <div id="player-active" style="display:none;" class="now-playing-hero">
+                    <img id="player-artwork" class="hero-artwork" src="" alt="">
+                    <div class="hero-info">
+                        <div class="hero-label">NOW PLAYING</div>
+                        <h1 class="hero-title">
+                            <a id="player-title-link" href="#" target="_blank"></a>
+                        </h1>
+                        <div class="hero-requester" id="player-requester"></div>
+                        <span class="hero-badge" id="player-filter" style="display:none;"></span>
                     </div>
                 </div>
+            </div>
 
-                <!-- Queue -->
-                <div class="queue-card">
-                    <div class="queue-header">
-                        <h3>Queue <span id="queue-count"></span></h3>
-                        <div class="queue-actions">
-                            <button class="btn btn-sm btn-icon" id="btn-shuffle-queue" title="Shuffle">&#x1F500; Shuffle</button>
-                        </div>
-                    </div>
-                    <ul class="queue-list" id="queue-list">
-                        <li class="queue-empty" id="queue-empty">Queue is empty</li>
-                    </ul>
-                </div>
-
-                <!-- Settings -->
+            <!-- Settings page -->
+            <div id="page-settings" class="page" style="display:none;">
+                <h2 class="page-title">Settings</h2>
                 <div class="settings-card">
-                    <h3 style="margin-bottom: 12px;">Guild Settings</h3>
                     <div class="settings-row">
-                        <span class="settings-label">24/7 Mode (stay in voice)</span>
+                        <div class="settings-info">
+                            <span class="material-symbols-outlined">schedule</span>
+                            <div>
+                                <div class="settings-label">24/7 Mode</div>
+                                <div class="settings-desc">Stay connected to voice channel</div>
+                            </div>
+                        </div>
                         <label class="toggle">
                             <input type="checkbox" id="setting-247">
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
                 </div>
+            </div>
+        </main>
+
+        <!-- Queue panel -->
+        <aside class="queue-container" id="queue-container">
+            <div class="queue-panel-header">
+                <h3>Queue</h3>
+                <button class="icon-btn" id="btn-shuffle-queue" title="Shuffle queue">
+                    <span class="material-symbols-outlined">shuffle</span>
+                </button>
+            </div>
+
+            <!-- Now playing in queue -->
+            <div class="queue-now-playing" id="queue-now-playing" style="display:none;">
+                <div class="queue-section-label">Now Playing</div>
+                <div class="queue-current" id="queue-current"></div>
+            </div>
+
+            <!-- Next in queue -->
+            <div class="queue-upcoming">
+                <div class="queue-section-label">Next in queue <span id="queue-count"></span></div>
+                <ul class="queue-list" id="queue-list">
+                    <li class="queue-empty" id="queue-empty">Queue is empty</li>
+                </ul>
+            </div>
+        </aside>
+
+        <!-- Bottom controller -->
+        <div class="control-container" id="control-container">
+            <!-- Left: track info -->
+            <div class="ctrl-track">
+                <img id="ctrl-artwork" class="ctrl-artwork" src="" alt="">
+                <div class="ctrl-track-info">
+                    <div class="ctrl-title" id="ctrl-title"></div>
+                    <div class="ctrl-artist" id="ctrl-requester"></div>
+                </div>
+            </div>
+
+            <!-- Center: playback controls + seek bar -->
+            <div class="ctrl-center">
+                <div class="ctrl-buttons">
+                    <button class="icon-btn ctrl-btn" id="btn-shuffle" title="Shuffle">
+                        <span class="material-symbols-outlined">shuffle</span>
+                    </button>
+                    <button class="icon-btn ctrl-btn" id="btn-prev" title="Previous" disabled>
+                        <span class="material-symbols-outlined">skip_previous</span>
+                    </button>
+                    <button class="icon-btn ctrl-btn-primary" id="btn-play-pause" title="Play/Pause">
+                        <span class="material-symbols-outlined" id="play-pause-icon">pause</span>
+                    </button>
+                    <button class="icon-btn ctrl-btn" id="btn-skip" title="Skip">
+                        <span class="material-symbols-outlined">skip_next</span>
+                    </button>
+                    <button class="icon-btn ctrl-btn" id="btn-stop" title="Stop">
+                        <span class="material-symbols-outlined">stop</span>
+                    </button>
+                </div>
+                <div class="ctrl-seek">
+                    <span class="ctrl-time" id="elapsed-time">0:00</span>
+                    <input type="range" class="range-input seek-bar" id="seek-bar" min="0" max="100" value="0">
+                    <span class="ctrl-time" id="total-time">0:00</span>
+                </div>
+            </div>
+
+            <!-- Right: volume, effects, queue toggle -->
+            <div class="ctrl-right">
+                <div class="ctrl-volume">
+                    <button class="icon-btn ctrl-btn" id="btn-volume" title="Volume">
+                        <span class="material-symbols-outlined" id="volume-icon">volume_up</span>
+                    </button>
+                    <input type="range" class="range-input volume-slider" id="volume-slider" min="0" max="100" value="50">
+                    <span class="ctrl-vol-label" id="volume-label">50%</span>
+                </div>
+
+                <select id="loop-select" class="mini-select" title="Loop mode">
+                    <option value="off">Loop: Off</option>
+                    <option value="track">Loop: Track</option>
+                    <option value="queue">Loop: Queue</option>
+                </select>
+
+                <select id="filter-select" class="mini-select" title="Audio filter">
+                    <option value="clear">No Effect</option>
+                    <option value="nightcore">Nightcore</option>
+                    <option value="vaporwave">Vaporwave</option>
+                    <option value="bassboost">Bass Boost</option>
+                    <option value="tremolo">Tremolo</option>
+                    <option value="vibrato">Vibrato</option>
+                    <option value="8d">8D Audio</option>
+                </select>
+
+                <button class="icon-btn ctrl-btn" id="btn-queue-toggle" title="Toggle queue">
+                    <span class="material-symbols-outlined">queue_music</span>
+                </button>
             </div>
         </div>
     </div>

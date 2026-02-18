@@ -1,5 +1,5 @@
 /**
- * Search input + results dropdown.
+ * Search input (in header) + results dropdown.
  */
 const Search = {
     debounceTimer: null,
@@ -30,12 +30,13 @@ const Search = {
             }
             if (e.key === "Escape") {
                 results.classList.remove("visible");
+                input.blur();
             }
         });
 
         // Close results on click outside
         document.addEventListener("click", (e) => {
-            if (!e.target.closest(".search-container")) {
+            if (!e.target.closest("#header-search")) {
                 results.classList.remove("visible");
             }
         });

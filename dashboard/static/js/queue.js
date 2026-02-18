@@ -1,5 +1,5 @@
 /**
- * Queue list UI with remove and drag-and-drop reorder.
+ * Queue panel UI with "Now Playing" section, queue list, remove and drag-and-drop reorder.
  */
 const Queue = {
     items: [],
@@ -15,9 +15,31 @@ const Queue = {
         this._render();
     },
 
+    updateNowPlaying(song) {
+        const section = document.getElementById("queue-now-playing");
+        const container = document.getElementById("queue-current");
+
+        if (!song) {
+            section.style.display = "none";
+            return;
+        }
+
+        section.style.display = "block";
+        container.innerHTML = `
+            ${song.thumbnail
+                ? `<img class="queue-current-thumb" src="${this._esc(song.thumbnail)}" alt="">`
+                : '<div class="queue-current-thumb"></div>'}
+            <div class="queue-current-info">
+                <div class="queue-current-title">${this._esc(song.title)}</div>
+                <div class="queue-current-meta">
+                    ${song.duration ? Player._formatTime(song.duration) : "Live"} &middot; ${this._esc(song.requester)}
+                </div>
+            </div>
+        `;
+    },
+
     _render() {
         const list = document.getElementById("queue-list");
-        const empty = document.getElementById("queue-empty");
         const countEl = document.getElementById("queue-count");
 
         if (!this.items.length) {
@@ -41,7 +63,9 @@ const Queue = {
                     </div>
                 </div>
                 <div class="queue-item-actions">
-                    <button class="queue-item-btn" data-remove="${i}" title="Remove">&#x2715;</button>
+                    <button class="queue-item-btn" data-remove="${i}" title="Remove">
+                        <span class="material-symbols-outlined">close</span>
+                    </button>
                 </div>
             </li>
         `).join("");
