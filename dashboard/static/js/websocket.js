@@ -77,7 +77,7 @@ const WS = {
                 Player.updateLoop(msg.data.loop);
                 break;
             case "queue_update":
-                if (msg.data.queue) {
+                if (msg.data && msg.data.queue) {
                     Queue.update(msg.data.queue);
                 } else {
                     // Refetch queue

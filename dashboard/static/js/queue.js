@@ -50,16 +50,19 @@ const Queue = {
 
         countEl.textContent = `(${this.items.length})`;
 
-        list.innerHTML = this.items.map((song, i) => `
+        list.innerHTML = this.items.map((song, i) => {
+            const thumb = song.thumbnail || this._ytThumb(song.url);
+            const duration = song.duration ? Player._formatTime(song.duration) : "Queued";
+            return `
             <li class="queue-item" draggable="true" data-index="${i}">
                 <span class="queue-item-index">${i + 1}</span>
-                ${song.thumbnail
-                    ? `<img class="queue-item-thumb" src="${this._esc(song.thumbnail)}" alt="">`
+                ${thumb
+                    ? `<img class="queue-item-thumb" src="${this._esc(thumb)}" alt="">`
                     : '<div class="queue-item-thumb"></div>'}
                 <div class="queue-item-info">
                     <div class="queue-item-title">${this._esc(song.title)}</div>
                     <div class="queue-item-meta">
-                        ${song.duration ? Player._formatTime(song.duration) : "Unknown"} &middot; ${this._esc(song.requester)}
+                        ${duration} &middot; ${this._esc(song.requester)}
                     </div>
                 </div>
                 <div class="queue-item-actions">
@@ -67,8 +70,8 @@ const Queue = {
                         <span class="material-symbols-outlined">close</span>
                     </button>
                 </div>
-            </li>
-        `).join("");
+            </li>`;
+        }).join("");
 
         // Remove buttons
         list.querySelectorAll("[data-remove]").forEach(btn => {
@@ -103,6 +106,12 @@ const Queue = {
                 }
             });
         });
+    },
+
+    _ytThumb(url) {
+        if (!url) return null;
+        const m = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([A-Za-z0-9_-]{11})/);
+        return m ? `https://i.ytimg.com/vi/${m[1]}/mqdefault.jpg` : null;
     },
 
     _esc(str) {

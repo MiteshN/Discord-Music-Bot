@@ -86,14 +86,16 @@ class NowPlayingView(discord.ui.View):
         if not self._in_voice(interaction):
             await interaction.response.send_message("You need to be in the voice channel.", ephemeral=True)
             return
+        await interaction.response.defer(ephemeral=True)
         vc = interaction.guild.voice_client
         gq = self.cog.queue_manager.get(interaction.guild.id)
         gq.clear()
         await self.cog._set_vc_status(vc, None)
         vc.stop()
         await vc.disconnect()
+        self.cog._emit_event(interaction.guild.id, "disconnected")
         self.stop()
-        await interaction.response.send_message("Stopped and disconnected.", ephemeral=True)
+        await interaction.followup.send("Stopped and disconnected.", ephemeral=True)
 
     @discord.ui.button(emoji="🔁", style=discord.ButtonStyle.secondary)
     async def loop(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -478,8 +480,8 @@ class Music(commands.Cog):
             if not searches:
                 await ctx.send("Could not resolve Spotify URL.")
                 return
-            for s in searches:
-                song = Song(title=s, url="", search_query=s, requester=ctx.author.display_name)
+            for s, thumb in searches:
+                song = Song(title=s, url="", search_query=s, requester=ctx.author.display_name, thumbnail=thumb)
                 gq.add(song)
             await ctx.send(f"Added **{len(searches)}** track(s) from Spotify to the queue.")
             if not vc.is_playing() and not vc.is_paused():
@@ -549,8 +551,8 @@ class Music(commands.Cog):
             if not searches:
                 await ctx.send("Could not resolve Spotify URL.")
                 return
-            for s in reversed(searches):
-                song = Song(title=s, url="", search_query=s, requester=ctx.author.display_name)
+            for s, thumb in reversed(searches):
+                song = Song(title=s, url="", search_query=s, requester=ctx.author.display_name, thumbnail=thumb)
                 gq.add_top(song)
             await ctx.send(f"Added **{len(searches)}** track(s) from Spotify to the top of the queue.")
             return
@@ -1152,8 +1154,8 @@ class Music(commands.Cog):
             searches = await self.bot.loop.run_in_executor(None, self.spotify.resolve, query)
             if not searches:
                 return {"error": "Could not resolve Spotify URL"}
-            for s in (reversed(searches) if top else searches):
-                song = Song(title=s, url="", search_query=s, requester=requester)
+            for s, thumb in (reversed(searches) if top else searches):
+                song = Song(title=s, url="", search_query=s, requester=requester, thumbnail=thumb)
                 if top:
                     gq.add_top(song)
                 else:

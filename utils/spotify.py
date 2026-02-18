@@ -33,14 +33,16 @@ class SpotifyResolver:
             return match.group(1), match.group(2)
         return None
 
-    def resolve_track(self, url: str) -> str | None:
+    def resolve_track(self, url: str) -> tuple[str, str] | None:
         if not self.sp:
             return None
         track = self.sp.track(url)
         artists = ", ".join(a["name"] for a in track["artists"])
-        return f"{artists} - {track['name']}"
+        query = f"{artists} - {track['name']}"
+        thumbnail = track["album"]["images"][0]["url"] if track["album"]["images"] else ""
+        return query, thumbnail
 
-    def resolve_playlist(self, url: str) -> list[str]:
+    def resolve_playlist(self, url: str) -> list[tuple[str, str]]:
         if not self.sp:
             return []
         results = []
@@ -49,20 +51,23 @@ class SpotifyResolver:
             track = item.get("track")
             if track:
                 artists = ", ".join(a["name"] for a in track["artists"])
-                results.append(f"{artists} - {track['name']}")
+                query = f"{artists} - {track['name']}"
+                thumbnail = track["album"]["images"][0]["url"] if track["album"]["images"] else ""
+                results.append((query, thumbnail))
         return results
 
-    def resolve_album(self, url: str) -> list[str]:
+    def resolve_album(self, url: str) -> list[tuple[str, str]]:
         if not self.sp:
             return []
         results = []
-        album = self.sp.album_tracks(url)
-        for track in album["items"]:
+        album = self.sp.album(url)
+        thumbnail = album["images"][0]["url"] if album["images"] else ""
+        for track in album["tracks"]["items"]:
             artists = ", ".join(a["name"] for a in track["artists"])
-            results.append(f"{artists} - {track['name']}")
+            results.append((f"{artists} - {track['name']}", thumbnail))
         return results
 
-    def resolve(self, url: str) -> list[str]:
+    def resolve(self, url: str) -> list[tuple[str, str]]:
         parsed = self.parse_url(url)
         if not parsed:
             return []
