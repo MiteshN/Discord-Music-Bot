@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import time
 import re
 import aiohttp
@@ -17,6 +18,7 @@ from utils.cache import CacheManager
 from utils.settings import GuildSettings
 
 YOUTUBE_PLAYLIST_RE = re.compile(r"(youtube\.com/.*[?&]list=|youtu\.be/.*[?&]list=)")
+DASHBOARD_URL = os.getenv("DASHBOARD_URL", "")
 
 
 def format_duration(seconds: int) -> str:
@@ -350,6 +352,8 @@ class Music(commands.Cog):
         embed.add_field(name="Requested by", value=song.requester, inline=True)
         if song.thumbnail:
             embed.set_thumbnail(url=song.thumbnail)
+        if DASHBOARD_URL:
+            embed.set_footer(text=f"Web Dashboard: {DASHBOARD_URL}")
         view = NowPlayingView(cog=self, ctx=ctx)
         await ctx.send(embed=embed, view=view)
 
@@ -639,12 +643,17 @@ class Music(commands.Cog):
                 entries.append(f"`{i}.` [{song.title}]({song.url or 'searching'}) | Requested by {song.requester}")
             embed.add_field(name="Up Next", value="\n".join(entries), inline=False)
             if len(gq.queue) > page_size:
-                embed.set_footer(text=f"And {len(gq.queue) - page_size} more...")
+                footer = f"And {len(gq.queue) - page_size} more..."
+                if DASHBOARD_URL:
+                    footer += f" • Web Dashboard: {DASHBOARD_URL}"
+                embed.set_footer(text=footer)
         else:
             embed.add_field(name="Up Next", value="Nothing in queue", inline=False)
 
         embed.add_field(name="Loop", value=gq.loop_mode.value, inline=True)
         embed.add_field(name="Volume", value=f"{int(gq.volume * 100)}%", inline=True)
+        if DASHBOARD_URL and len(gq.queue) <= page_size:
+            embed.set_footer(text=f"Web Dashboard: {DASHBOARD_URL}")
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="volume", description="Set the volume (0-100)")
@@ -695,6 +704,8 @@ class Music(commands.Cog):
         embed.add_field(name="Loop", value=gq.loop_mode.value, inline=True)
         if gq.current.thumbnail:
             embed.set_thumbnail(url=gq.current.thumbnail)
+        if DASHBOARD_URL:
+            embed.set_footer(text=f"Web Dashboard: {DASHBOARD_URL}")
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="loop", description="Set loop mode: off, track, or queue")
