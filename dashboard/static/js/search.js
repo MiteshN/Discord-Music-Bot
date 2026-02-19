@@ -70,7 +70,7 @@ const Search = {
             item.addEventListener("click", () => {
                 const result = results[i];
                 if (App.guildId) {
-                    API.addToQueue(App.guildId, result.url || result.title);
+                    API.addToQueue(App.guildId, result.url || result.title, result.title, result.thumbnail, result.duration);
                     document.getElementById("search-input").value = "";
                     container.classList.remove("visible");
                 }

@@ -217,7 +217,10 @@ async def queue_add(guild_id: int):
     if not query:
         return jsonify({"error": "Missing query"}), 400
     requester = session["user"]["username"]
-    result = await cog.api_add_to_queue(guild_id, query, requester, top=False)
+    title = data.get("title") or None
+    thumbnail = data.get("thumbnail") or None
+    duration = data.get("duration") or None
+    result = await cog.api_add_to_queue(guild_id, query, requester, top=False, title=title, thumbnail=thumbnail, duration=duration)
     return jsonify(result)
 
 
@@ -233,7 +236,10 @@ async def queue_add_top(guild_id: int):
     if not query:
         return jsonify({"error": "Missing query"}), 400
     requester = session["user"]["username"]
-    result = await cog.api_add_to_queue(guild_id, query, requester, top=True)
+    title = data.get("title") or None
+    thumbnail = data.get("thumbnail") or None
+    duration = data.get("duration") or None
+    result = await cog.api_add_to_queue(guild_id, query, requester, top=True, title=title, thumbnail=thumbnail, duration=duration)
     return jsonify(result)
 
 

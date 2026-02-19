@@ -489,6 +489,8 @@ class Music(commands.Cog):
                 next_song = gq.next()
                 if next_song:
                     await self._play_song(ctx, next_song)
+            else:
+                self._emit_event(ctx.guild.id, "queue_update")
             return
 
         # YouTube playlist handling
@@ -511,6 +513,8 @@ class Music(commands.Cog):
                 next_song = gq.next()
                 if next_song:
                     await self._play_song(ctx, next_song)
+            else:
+                self._emit_event(ctx.guild.id, "queue_update")
             return
 
         # Single track (URL or search)
@@ -1143,7 +1147,7 @@ class Music(commands.Cog):
             return {"status": "moved"}
         return {"error": "Invalid indices"}
 
-    async def api_add_to_queue(self, guild_id: int, query: str, requester: str, top: bool = False) -> dict:
+    async def api_add_to_queue(self, guild_id: int, query: str, requester: str, top: bool = False, title: str | None = None, thumbnail: str | None = None, duration: int | None = None) -> dict:
         guild = self.bot.get_guild(guild_id)
         if not guild or not guild.voice_client:
             return {"error": "Bot is not in a voice channel. Use Discord to start playback first."}
@@ -1171,7 +1175,8 @@ class Music(commands.Cog):
 
             return {"status": "added", "count": len(searches)}
 
-        song = Song(title=query, url=query, search_query=query, requester=requester)
+        song = Song(title=title or query, url=query, search_query=query, requester=requester,
+                    thumbnail=thumbnail or "", duration=duration or 0)
         if top:
             gq.add_top(song)
         else:

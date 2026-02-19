@@ -73,12 +73,12 @@ const API = {
         return this.request("POST", `/api/guild/${guildId}/player/filter`, { filter });
     },
 
-    addToQueue(guildId, query) {
-        return this.request("POST", `/api/guild/${guildId}/queue/add`, { query });
+    addToQueue(guildId, query, title, thumbnail, duration) {
+        return this.request("POST", `/api/guild/${guildId}/queue/add`, { query, title, thumbnail, duration });
     },
 
-    addToQueueTop(guildId, query) {
-        return this.request("POST", `/api/guild/${guildId}/queue/add-top`, { query });
+    addToQueueTop(guildId, query, title, thumbnail, duration) {
+        return this.request("POST", `/api/guild/${guildId}/queue/add-top`, { query, title, thumbnail, duration });
     },
 
     moveInQueue(guildId, from, to) {
