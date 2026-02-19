@@ -37,18 +37,16 @@ const Player = {
             if (App.guildId) API.shuffleQueue(App.guildId);
         });
 
-        // Volume
+        // Volume — update label/icon while dragging, send API only on release
         const volSlider = document.getElementById("volume-slider");
-        let volTimeout = null;
         volSlider.addEventListener("input", () => {
             const val = parseInt(volSlider.value);
             document.getElementById("volume-label").textContent = val + "%";
             this._updateVolumeIcon(val);
             this._updateRangeFill(volSlider);
-            clearTimeout(volTimeout);
-            volTimeout = setTimeout(() => {
-                if (App.guildId) API.setVolume(App.guildId, val);
-            }, 300);
+        });
+        volSlider.addEventListener("change", () => {
+            if (App.guildId) API.setVolume(App.guildId, parseInt(volSlider.value));
         });
 
         // Loop

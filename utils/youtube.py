@@ -33,25 +33,34 @@ YTDL_PLAYLIST_OPTIONS = {
 
 FFMPEG_BEFORE_OPTIONS_STREAM = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 200000 -thread_queue_size 4096"
 FFMPEG_BEFORE_OPTIONS_LOCAL = "-probesize 200000 -thread_queue_size 4096"
-FFMPEG_OPTIONS = {
-    "before_options": FFMPEG_BEFORE_OPTIONS_STREAM,
-    "options": "-vn -bufsize 512k",
-}
 
 ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
 ytdl_search = yt_dlp.YoutubeDL(YTDL_SEARCH_OPTIONS)
 ytdl_playlist = yt_dlp.YoutubeDL(YTDL_PLAYLIST_OPTIONS)
 
 
-class YTDLSource(discord.PCMVolumeTransformer):
-    def __init__(self, source, *, data, volume=0.5):
-        super().__init__(source, volume)
+class YTDLSource(discord.AudioSource):
+    """Wraps FFmpegOpusAudio with track metadata. Volume and filters are baked
+    into the FFmpeg -af chain at creation time, so is_opus() returns True and
+    discord.py skips its own Opus re-encode step entirely."""
+
+    def __init__(self, source: discord.FFmpegOpusAudio, *, data: dict):
+        self._source = source
         self.data = data
         self.title = data.get("title", "Unknown")
         self.url = data.get("url")
         self.webpage_url = data.get("webpage_url", "")
         self.duration = data.get("duration") or 0
         self.thumbnail = data.get("thumbnail", "")
+
+    def read(self) -> bytes:
+        return self._source.read()
+
+    def is_opus(self) -> bool:
+        return True
+
+    def cleanup(self):
+        self._source.cleanup()
 
     @classmethod
     async def create_source(cls, search: str, *, loop: asyncio.AbstractEventLoop = None, volume: float = 0.5, seek_to: int = 0, audio_filter: str = "", cache_manager=None):
@@ -93,16 +102,27 @@ class YTDLSource(discord.PCMVolumeTransformer):
         if seek_to > 0:
             before_options = f"-ss {seek_to} {before_options}"
 
-        options = FFMPEG_OPTIONS["options"]
+        # Build -af filter chain: volume (if not unity) + any audio effect
+        af_filters = []
+        if abs(volume - 1.0) > 1e-6:
+            af_filters.append(f"volume={volume:.4f}")
         if audio_filter:
-            options = f"{options} -af {audio_filter}"
+            af_filters.append(audio_filter)
 
-        source = discord.FFmpegPCMAudio(
+        options = "-vn"
+        if af_filters:
+            options += f" -af {','.join(af_filters)}"
+
+        # codec=None → discord.py default → libopus encoding.
+        # (Passing 'libopus' would trigger discord.py's 'copy' branch — see player.py:445)
+        log.debug("FFmpegOpusAudio local=%s filters=%s", is_local, af_filters)
+
+        opus_source = discord.FFmpegOpusAudio(
             audio_path,
             before_options=before_options,
             options=options,
         )
-        return cls(source, data=data, volume=volume)
+        return cls(opus_source, data=data)
 
     @classmethod
     async def search_results(cls, query: str, count: int = 5, *, loop: asyncio.AbstractEventLoop = None):

@@ -397,8 +397,8 @@ class Music(commands.Cog):
             if gq.twenty_four_seven:
                 continue
             if not vc.is_playing() and not vc.is_paused() and not gq.queue:
-                if gq.start_time and (time.time() - gq.start_time) > 180:
-                    log.info("[Guild %d] Auto-disconnecting after 3min idle", vc.guild.id)
+                if gq.start_time and (time.time() - gq.start_time) > 600:
+                    log.info("[Guild %d] Auto-disconnecting after 10min idle", vc.guild.id)
                     gq.clear()
                     self.queue_manager.remove(vc.guild.id)
                     self._loaded_guilds.discard(vc.guild.id)
@@ -671,8 +671,8 @@ class Music(commands.Cog):
         await self._ensure_settings(ctx.guild.id)
         gq = self.queue_manager.get(ctx.guild.id)
         gq.volume = vol / 100
-        if ctx.voice_client and ctx.voice_client.source:
-            ctx.voice_client.source.volume = gq.volume
+        if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
+            await self._apply_filter(ctx)
         await self.settings.save(ctx.guild.id, gq.volume, gq.twenty_four_seven)
         self._emit_event(ctx.guild.id, "volume_update", {"volume": vol})
         await ctx.send(f"Volume set to **{vol}%**.")
@@ -1108,8 +1108,30 @@ class Music(commands.Cog):
         gq = self.queue_manager.get(guild_id)
         gq.volume = vol / 100
         guild = self.bot.get_guild(guild_id)
-        if guild and guild.voice_client and guild.voice_client.source:
-            guild.voice_client.source.volume = gq.volume
+        vc = guild.voice_client if guild else None
+        if vc and gq.current and (vc.is_playing() or vc.is_paused()):
+            elapsed = int(time.time() - gq.start_time) if gq.start_time else 0
+            self._restarting.add(guild_id)
+            vc.stop()
+            try:
+                source = await YTDLSource.create_source(
+                    gq.current.url or gq.current.search_query,
+                    loop=self.bot.loop,
+                    volume=gq.volume,
+                    seek_to=elapsed,
+                    audio_filter=gq.audio_filter,
+                    cache_manager=self.cache_manager,
+                )
+            except Exception as e:
+                self._restarting.discard(guild_id)
+                return {"error": str(e)}
+            gq.start_time = time.time() - elapsed
+            self._restarting.discard(guild_id)
+            def after_play(error):
+                if error:
+                    log.error("[Guild %d] Playback error: %s", guild_id, error)
+                asyncio.run_coroutine_threadsafe(self._api_play_next(guild_id), self.bot.loop)
+            vc.play(source, after=after_play)
         await self.settings.save(guild_id, gq.volume, gq.twenty_four_seven)
         self._emit_event(guild_id, "volume_update", {"volume": vol})
         return {"status": "ok", "volume": vol}
@@ -1266,9 +1288,6 @@ class Music(commands.Cog):
             vol = data["volume"]
             if 0 <= vol <= 100:
                 gq.volume = vol / 100
-                guild = self.bot.get_guild(guild_id)
-                if guild and guild.voice_client and guild.voice_client.source:
-                    guild.voice_client.source.volume = gq.volume
         if "twenty_four_seven" in data:
             gq.twenty_four_seven = bool(data["twenty_four_seven"])
         await self.settings.save(guild_id, gq.volume, gq.twenty_four_seven)
