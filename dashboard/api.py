@@ -1,5 +1,6 @@
 """REST API blueprint for the dashboard. Every action goes through the Music cog."""
 
+import asyncio
 import functools
 import logging
 
@@ -186,8 +187,24 @@ async def search(guild, cog, body):
 
     query = request.args.get("q", "").strip()
     if len(query) < 2:
-        return []
-    return await youtube.search(query, count=8)
+        return {"songs": [], "albums": [], "videos": []}
+
+    async def spotify():
+        if not cog.spotify.sp:
+            return {"songs": [], "albums": []}
+        # Don't let a slow Spotify API hold up the YouTube results
+        return await asyncio.wait_for(asyncio.to_thread(cog.spotify.search, query, 5, 2), timeout=3)
+
+    videos, found = await asyncio.gather(youtube.search(query, count=5), spotify(), return_exceptions=True)
+    for name, result in (("YouTube", videos), ("Spotify", found)):
+        if isinstance(result, BaseException):
+            log.warning("%s search failed for %r: %r", name, query, result)
+    found = found if isinstance(found, dict) else {"songs": [], "albums": []}
+    return {
+        "songs": found["songs"],
+        "albums": found["albums"],
+        "videos": videos if isinstance(videos, list) else [],
+    }
 
 
 # --- Settings ---

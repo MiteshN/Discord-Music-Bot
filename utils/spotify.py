@@ -26,6 +26,14 @@ def _track_info(track: dict, thumbnail: str | None = None) -> dict:
     }
 
 
+def _image(item: dict) -> str:
+    """A ~300px image for search results (Spotify lists images largest first)."""
+    images = item.get("images") or []
+    if not images:
+        return ""
+    return images[1]["url"] if len(images) > 1 else images[0]["url"]
+
+
 class SpotifyResolver:
     """Resolves Spotify links to track metadata. Audio is then matched on YouTube Music."""
 
@@ -51,6 +59,29 @@ class SpotifyResolver:
             page = self.sp.next(page)
             items.extend(page["items"])
         return items[:MAX_TRACKS]
+
+    def search(self, query: str, tracks: int = 5, albums: int = 2) -> dict[str, list[dict]]:
+        """Search tracks and albums. Blocking; run in a thread."""
+        if not self.sp:
+            return {"songs": [], "albums": []}
+        results = self.sp.search(query, type="track,album", limit=max(tracks, albums))
+        songs = []
+        for track in (results.get("tracks") or {}).get("items") or []:
+            if track and track.get("id"):
+                info = _track_info(track, _image(track.get("album") or {}))
+                songs.append({**info, "url": f"https://open.spotify.com/track/{track['id']}"})
+        found_albums = []
+        for album in (results.get("albums") or {}).get("items") or []:
+            if album and album.get("id"):
+                found_albums.append({
+                    "title": album["name"],
+                    "artist": ", ".join(a["name"] for a in album.get("artists", [])),
+                    "tracks": album.get("total_tracks") or 0,
+                    "year": (album.get("release_date") or "")[:4],
+                    "thumbnail": _image(album),
+                    "url": f"https://open.spotify.com/album/{album['id']}",
+                })
+        return {"songs": songs[:tracks], "albums": found_albums[:albums]}
 
     def resolve(self, url: str) -> tuple[str, list[dict]]:
         """Return (collection name, tracks). Blocking; run in a thread."""

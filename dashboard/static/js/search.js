@@ -1,5 +1,6 @@
 /**
- * Search box: live YouTube results with keyboard navigation. Enter adds the typed text or link directly.
+ * Search box: Spotify songs and albums plus YouTube videos, with keyboard navigation.
+ * Enter with nothing highlighted adds the typed text or link directly.
  */
 const Search = {
     timer: null,
@@ -46,8 +47,7 @@ const Search = {
         this.box.addEventListener("click", (e) => {
             const row = e.target.closest(".result");
             if (!row) return;
-            const btn = e.target.closest("[data-top]");
-            this._add(this.results[+row.dataset.index], !!btn);
+            this._add(this.results[+row.dataset.index], !!e.target.closest("[data-top]"));
         });
 
         document.addEventListener("click", (e) => { if (!e.target.closest("#search")) this._close(); });
@@ -59,8 +59,7 @@ const Search = {
         this.controller = new AbortController();
         this.wrap.classList.add("loading");
         try {
-            this.results = await API.search(query, this.controller.signal);
-            this._render();
+            this._render(await API.search(query, this.controller.signal));
         } catch (err) {
             if (err.name !== "AbortError") this._close();
         } finally {
@@ -68,38 +67,68 @@ const Search = {
         }
     },
 
-    _render() {
+    /** Flatten the grouped response into one navigable list. */
+    _items(data) {
+        const songs = (data.songs || []).map(s => ({
+            kind: "song", source: "spotify", query: s.url, title: s.name,
+            meta: [s.artist, s.duration ? fmt(s.duration) : ""], thumb: s.thumbnail, label: `${s.name} by ${s.artist}`,
+        }));
+        const albums = (data.albums || []).map(a => ({
+            kind: "album", source: "spotify", query: a.url, title: a.title,
+            meta: ["Album", a.artist, a.year, a.tracks ? `${a.tracks} songs` : ""], thumb: a.thumbnail, label: `album ${a.title}`,
+        }));
+        const videos = (data.videos || []).map(v => ({
+            kind: "video", source: "youtube", query: v.url || v.title, title: v.title,
+            meta: [v.duration ? fmt(v.duration) : ""], thumb: v.thumbnail, label: v.title,
+        }));
+        return [["Songs", songs], ["Albums", albums], ["Videos", videos]];
+    },
+
+    _render(data) {
+        const groups = this._items(data || {});
+        this.results = groups.flatMap(([, items]) => items);
         this.active = -1;
         if (!this.results.length) {
             this._showHint("No results");
             return;
         }
+
         this.box.innerHTML = "";
-        this.results.forEach((r, i) => {
-            const row = document.createElement("div");
-            row.className = "result";
-            row.dataset.index = i;
-            row.setAttribute("role", "option");
-            row.innerHTML = `
-                <img class="result-thumb" alt="" loading="lazy">
-                <div class="result-info">
-                    <div class="result-title"></div>
-                    <div class="result-meta"></div>
-                </div>
-                <div class="result-actions">
-                    <button class="result-btn" data-top title="Play next (Shift+Enter)"><span class="icon">vertical_align_top</span><span>Next</span></button>
-                    <button class="result-btn primary" title="Add to queue (Enter)"><span class="icon">add</span><span>Add</span></button>
-                </div>`;
-            if (r.thumbnail) row.querySelector(".result-thumb").src = r.thumbnail;
-            row.querySelector(".result-title").textContent = r.title;
-            row.querySelector(".result-meta").textContent = r.duration ? fmt(r.duration) : "";
-            this.box.append(row);
-        });
+        let index = 0;
+        for (const [heading, items] of groups) {
+            if (!items.length) continue;
+            const head = document.createElement("div");
+            head.className = "result-group";
+            head.textContent = heading;
+            this.box.append(head);
+            for (const item of items) this.box.append(this._row(item, index++));
+        }
         const hint = document.createElement("div");
         hint.className = "result-hint";
         hint.textContent = "↑↓ to choose · Enter to add · Shift+Enter to play next";
         this.box.append(hint);
         this.box.classList.add("open");
+    },
+
+    _row(item, index) {
+        const row = document.createElement("div");
+        row.className = `result result-${item.kind}`;
+        row.dataset.index = index;
+        row.setAttribute("role", "option");
+        row.innerHTML = `
+            <img class="result-thumb" alt="" loading="lazy">
+            <div class="result-info">
+                <div class="result-title"></div>
+                <div class="result-meta"><span class="src src-${item.source}">${item.source === "spotify" ? "Spotify" : "YouTube"}</span><span class="result-meta-text"></span></div>
+            </div>
+            <div class="result-actions">
+                <button class="result-btn" data-top title="Play next (Shift+Enter)"><span class="icon">vertical_align_top</span><span>Next</span></button>
+                <button class="result-btn primary" title="Add to queue (Enter)"><span class="icon">add</span><span>Add</span></button>
+            </div>`;
+        if (item.thumb) row.querySelector(".result-thumb").src = item.thumb;
+        row.querySelector(".result-title").textContent = item.title;
+        row.querySelector(".result-meta-text").textContent = item.meta.filter(Boolean).join(" · ");
+        return row;
     },
 
     _highlight() {
@@ -117,14 +146,15 @@ const Search = {
         this.box.classList.add("open");
     },
 
-    _add(result, top) {
-        this._addQuery(result.url || result.title, top);
+    _add(item, top) {
+        this._addQuery(item.query, top, item.label);
     },
 
-    async _addQuery(query, top) {
+    async _addQuery(query, top, label) {
         this._close();
         this.input.value = "";
-        App.toast(top ? "Adding to the top of the queue…" : "Adding…");
+        const what = label ? ` “${label}”` : "";
+        App.toast(top ? `Adding${what} to play next…` : `Adding${what}…`);
         const res = await API.action("queue/add", { query, top });
         if (res?.message) App.toast(res.message, "success");
     },

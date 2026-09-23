@@ -937,16 +937,11 @@ class Music(commands.Cog):
     async def _spotify_suggestions(self, query: str, limit: int = 4) -> list[app_commands.Choice[str]]:
         if not self.spotify.sp:
             return []
-        results = await asyncio.to_thread(self.spotify.sp.search, query, type="track,album", limit=limit)
-        choices = []
-        for track in results.get("tracks", {}).get("items", [])[:limit]:
-            artist = track["artists"][0]["name"] if track["artists"] else ""
-            choices.append(app_commands.Choice(name=f"Spotify · {track['name']} — {artist}"[:100],
-                                               value=f"https://open.spotify.com/track/{track['id']}"))
-        for album in results.get("albums", {}).get("items", [])[: limit // 2]:
-            artist = album["artists"][0]["name"] if album["artists"] else ""
-            choices.append(app_commands.Choice(name=f"Spotify album · {album['name']} — {artist}"[:100],
-                                               value=f"https://open.spotify.com/album/{album['id']}"))
+        found = await asyncio.to_thread(self.spotify.search, query, limit, limit // 2)
+        choices = [app_commands.Choice(name=f"Spotify · {s['name']} — {s['artist']}"[:100], value=s["url"])
+                   for s in found["songs"]]
+        choices += [app_commands.Choice(name=f"Spotify album · {a['title']} — {a['artist']}"[:100], value=a["url"])
+                    for a in found["albums"]]
         return choices
 
     async def play_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
