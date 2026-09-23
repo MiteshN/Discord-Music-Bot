@@ -1,6 +1,7 @@
+import asyncio
 import logging
 import os
-import asyncio
+
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -14,52 +15,71 @@ logging.basicConfig(
 )
 log = logging.getLogger("bot")
 
-intents = discord.Intents.default()
-intents.message_content = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+class MusicBot(commands.Bot):
+    def __init__(self):
+        intents = discord.Intents.default()
+        intents.message_content = True
+        super().__init__(
+            command_prefix=commands.when_mentioned_or("!"),
+            intents=intents,
+            activity=discord.Activity(type=discord.ActivityType.listening, name="/play"),
+        )
+        self._dashboard_task: asyncio.Task | None = None
+        self._dashboard_shutdown = asyncio.Event()
 
+    async def setup_hook(self):
+        await self.load_extension("cogs.music")
+        # Sync once per start (not on every reconnect like on_ready would)
+        try:
+            synced = await self.tree.sync()
+            log.info("Synced %d slash commands", len(synced))
+        except discord.HTTPException as e:
+            log.error("Failed to sync commands: %s", e)
+        if os.getenv("DISCORD_CLIENT_ID") and os.getenv("DISCORD_CLIENT_SECRET"):
+            self._dashboard_task = asyncio.create_task(self._run_dashboard())
+        else:
+            log.info("Dashboard disabled: DISCORD_CLIENT_ID / DISCORD_CLIENT_SECRET not set")
 
-@bot.event
-async def on_ready():
-    log.info("Logged in as %s (ID: %s)", bot.user, bot.user.id)
-    try:
-        synced = await bot.tree.sync()
-        log.info("Synced %d slash commands", len(synced))
-    except Exception as e:
-        log.error("Failed to sync commands: %s", e)
+    async def on_ready(self):
+        log.info("Logged in as %s (ID: %s) in %d servers", self.user, self.user.id, len(self.guilds))
 
+    async def _run_dashboard(self):
+        from hypercorn.asyncio import serve
+        from hypercorn.config import Config
 
-async def start_dashboard():
-    """Start the Quart dashboard alongside the bot if OAuth2 credentials are configured."""
-    client_id = os.getenv("DISCORD_CLIENT_ID")
-    client_secret = os.getenv("DISCORD_CLIENT_SECRET")
-    if not client_id or not client_secret:
-        log.info("Dashboard disabled: DISCORD_CLIENT_ID / DISCORD_CLIENT_SECRET not set")
-        return
+        from dashboard import create_app
 
-    from dashboard import create_app
-    from hypercorn.asyncio import serve
-    from hypercorn.config import Config
+        config = Config()
+        port = int(os.getenv("DASHBOARD_PORT", "8080"))
+        config.bind = [f"0.0.0.0:{port}"]
+        config.accesslog = None
+        log.info("Starting dashboard on port %d", port)
+        try:
+            await serve(create_app(self), config, shutdown_trigger=self._dashboard_shutdown.wait)
+        except Exception:
+            log.exception("Dashboard crashed")
 
-    app = create_app(bot)
-
-    config = Config()
-    port = int(os.getenv("DASHBOARD_PORT", "8080"))
-    config.bind = [f"0.0.0.0:{port}"]
-    config.accesslog = "-"
-
-    log.info("Starting dashboard on port %d", port)
-    await serve(app, config, shutdown_trigger=lambda: asyncio.Future())
+    async def close(self):
+        self._dashboard_shutdown.set()
+        if self._dashboard_task:
+            try:
+                await asyncio.wait_for(self._dashboard_task, timeout=5)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+        await super().close()
 
 
 async def main():
-    async with bot:
-        await bot.load_extension("cogs.music")
-        # Start dashboard as a background task (non-blocking)
-        asyncio.create_task(start_dashboard())
-        await bot.start(os.getenv("DISCORD_BOT_TOKEN"))
+    token = os.getenv("DISCORD_BOT_TOKEN")
+    if not token:
+        raise SystemExit("DISCORD_BOT_TOKEN is not set")
+    async with MusicBot() as bot:
+        await bot.start(token)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass

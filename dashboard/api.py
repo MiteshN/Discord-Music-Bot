@@ -1,9 +1,11 @@
-"""REST API blueprint for the dashboard."""
+"""REST API blueprint for the dashboard. Every action goes through the Music cog."""
 
+import functools
 import logging
 
-from quart import Blueprint, jsonify, request, session, current_app
+from quart import Blueprint, current_app, jsonify, request, session
 
+from cogs.music import PlayerError
 from dashboard.auth import require_auth_api
 
 log = logging.getLogger("bot.dashboard.api")
@@ -11,40 +13,41 @@ log = logging.getLogger("bot.dashboard.api")
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
 
-def _get_bot():
+def _bot():
     return current_app.config["BOT"]
 
 
-def _get_music_cog():
-    return _get_bot().cogs.get("Music")
+def user_can_access(guild_id: int) -> bool:
+    return str(guild_id) in session.get("guild_ids", []) and _bot().get_guild(guild_id) is not None
 
 
-def _check_guild_access(guild_id: int) -> str | None:
-    """Return error message if user cannot access this guild, else None."""
-    user_guild_ids = {int(gid) for gid in session.get("guild_ids", [])}
-    bot_guild_ids = {g.id for g in _get_bot().guilds}
-    if guild_id not in user_guild_ids:
-        return "You are not in this guild"
-    if guild_id not in bot_guild_ids:
-        return "Bot is not in this guild"
-    return None
-
-
-def require_guild_access(func):
-    """Decorator: checks guild access for routes with guild_id param."""
-    import functools
+def guild_action(func):
+    """Auth + guild access check, then call func(guild, cog, body). PlayerError becomes a 400."""
 
     @functools.wraps(func)
-    async def wrapper(guild_id: int, *args, **kwargs):
-        err = _check_guild_access(guild_id)
-        if err:
-            return jsonify({"error": err}), 403
-        return await func(guild_id, *args, **kwargs)
+    @require_auth_api
+    async def wrapper(guild_id: int, **kwargs):
+        if not user_can_access(guild_id):
+            return jsonify({"error": "You don't have access to that server"}), 403
+        cog = _bot().cogs.get("Music")
+        if cog is None:
+            return jsonify({"error": "Music is unavailable right now"}), 503
+        body = await request.get_json(silent=True) if request.method == "POST" else None
+        try:
+            result = await func(_bot().get_guild(guild_id), cog, body if isinstance(body, dict) else {}, **kwargs)
+        except PlayerError as e:
+            return jsonify({"error": str(e)}), 400
+        except (KeyError, TypeError, ValueError) as e:
+            log.debug("Bad request to %s: %r", request.path, e)
+            return jsonify({"error": "Invalid request"}), 400
+        if isinstance(result, str):
+            result = {"status": "ok", "message": result}
+        return jsonify(result)
 
     return wrapper
 
 
-# --- User / Guild listing ---
+# --- User / guilds ---
 
 @api_bp.route("/@me")
 @require_auth_api
@@ -55,255 +58,143 @@ async def me():
 @api_bp.route("/guilds")
 @require_auth_api
 async def guilds():
-    bot = _get_bot()
-    user_guild_ids = {int(gid) for gid in session.get("guild_ids", [])}
+    user_guild_ids = set(session.get("guild_ids", []))
+    cog = _bot().cogs.get("Music")
+    result = []
+    for guild in _bot().guilds:
+        if str(guild.id) not in user_guild_ids:
+            continue
+        gq = cog.queues.peek(guild.id) if cog else None
+        result.append({
+            "id": str(guild.id),
+            "name": guild.name,
+            "icon": guild.icon.url if guild.icon else None,
+            "playing": bool(gq and gq.current),
+        })
+    return jsonify(result)
 
-    shared = []
-    for guild in bot.guilds:
-        if guild.id in user_guild_ids:
-            icon_url = guild.icon.url if guild.icon else None
-            shared.append({
-                "id": str(guild.id),
-                "name": guild.name,
-                "icon": icon_url,
-            })
-    return jsonify(shared)
 
-
-# --- Player state ---
+# --- State ---
 
 @api_bp.route("/guild/<int:guild_id>/player")
-@require_auth_api
-@require_guild_access
-async def player_state(guild_id: int):
-    from dashboard.websocket import _get_player_state
-    state = _get_player_state(_get_bot(), guild_id)
-    return jsonify(state)
-
-
-@api_bp.route("/guild/<int:guild_id>/queue")
-@require_auth_api
-@require_guild_access
-async def queue_state(guild_id: int):
-    cog = _get_music_cog()
-    if not cog:
-        return jsonify([])
-    gq = cog.queue_manager.get(guild_id)
-    queue = [
-        {
-            "title": s.title,
-            "url": s.url,
-            "duration": s.duration,
-            "thumbnail": s.thumbnail,
-            "requester": s.requester,
-        }
-        for s in gq.queue
-    ]
-    return jsonify(queue)
-
-
-@api_bp.route("/guild/<int:guild_id>/settings")
-@require_auth_api
-@require_guild_access
-async def get_settings(guild_id: int):
-    cog = _get_music_cog()
-    if not cog:
-        return jsonify({"error": "Music cog not loaded"}), 500
-    gq = cog.queue_manager.get(guild_id)
-    return jsonify({
-        "volume": int(gq.volume * 100),
-        "twenty_four_seven": gq.twenty_four_seven,
-    })
+@guild_action
+async def player_state(guild, cog, body):
+    return cog.player_state(guild.id)
 
 
 # --- Player controls ---
 
 @api_bp.route("/guild/<int:guild_id>/player/pause", methods=["POST"])
-@require_auth_api
-@require_guild_access
-async def pause_resume(guild_id: int):
-    cog = _get_music_cog()
-    if not cog:
-        return jsonify({"error": "Music cog not loaded"}), 500
-    result = await cog.api_pause_resume(guild_id)
-    return jsonify(result)
+@guild_action
+async def pause_resume(guild, cog, body):
+    return await cog.toggle_pause(guild)
 
 
 @api_bp.route("/guild/<int:guild_id>/player/skip", methods=["POST"])
-@require_auth_api
-@require_guild_access
-async def skip(guild_id: int):
-    cog = _get_music_cog()
-    if not cog:
-        return jsonify({"error": "Music cog not loaded"}), 500
-    result = await cog.api_skip(guild_id)
-    return jsonify(result)
+@guild_action
+async def skip(guild, cog, body):
+    return await cog.skip(guild)
+
+
+@api_bp.route("/guild/<int:guild_id>/player/previous", methods=["POST"])
+@guild_action
+async def previous(guild, cog, body):
+    return await cog.previous(guild)
 
 
 @api_bp.route("/guild/<int:guild_id>/player/stop", methods=["POST"])
-@require_auth_api
-@require_guild_access
-async def stop(guild_id: int):
-    cog = _get_music_cog()
-    if not cog:
-        return jsonify({"error": "Music cog not loaded"}), 500
-    result = await cog.api_stop(guild_id)
-    return jsonify(result)
+@guild_action
+async def stop(guild, cog, body):
+    return await cog.stop_player(guild)
 
 
 @api_bp.route("/guild/<int:guild_id>/player/seek", methods=["POST"])
-@require_auth_api
-@require_guild_access
-async def seek(guild_id: int):
-    cog = _get_music_cog()
-    if not cog:
-        return jsonify({"error": "Music cog not loaded"}), 500
-    data = await request.get_json()
-    position = data.get("position", 0)
-    result = await cog.api_seek(guild_id, position)
-    return jsonify(result)
+@guild_action
+async def seek(guild, cog, body):
+    return await cog.seek(guild, int(body.get("position", 0)))
 
 
 @api_bp.route("/guild/<int:guild_id>/player/volume", methods=["POST"])
-@require_auth_api
-@require_guild_access
-async def volume(guild_id: int):
-    cog = _get_music_cog()
-    if not cog:
-        return jsonify({"error": "Music cog not loaded"}), 500
-    data = await request.get_json()
-    vol = data.get("volume", 50)
-    result = await cog.api_volume(guild_id, vol)
-    return jsonify(result)
+@guild_action
+async def volume(guild, cog, body):
+    return await cog.set_volume(guild, int(body.get("volume", 100)))
 
 
 @api_bp.route("/guild/<int:guild_id>/player/loop", methods=["POST"])
-@require_auth_api
-@require_guild_access
-async def loop(guild_id: int):
-    cog = _get_music_cog()
-    if not cog:
-        return jsonify({"error": "Music cog not loaded"}), 500
-    data = await request.get_json()
-    mode = data.get("mode", "off")
-    result = await cog.api_loop(guild_id, mode)
-    return jsonify(result)
+@guild_action
+async def loop(guild, cog, body):
+    return await cog.set_loop(guild, body.get("mode"))
 
 
 @api_bp.route("/guild/<int:guild_id>/player/filter", methods=["POST"])
-@require_auth_api
-@require_guild_access
-async def apply_filter(guild_id: int):
-    cog = _get_music_cog()
-    if not cog:
-        return jsonify({"error": "Music cog not loaded"}), 500
-    data = await request.get_json()
-    filter_name = data.get("filter", "clear")
-    result = await cog.api_filter(guild_id, filter_name)
-    return jsonify(result)
+@guild_action
+async def apply_filter(guild, cog, body):
+    return await cog.set_filter(guild, str(body.get("filter", "")))
 
 
-# --- Queue controls ---
+# --- Queue ---
 
 @api_bp.route("/guild/<int:guild_id>/queue/add", methods=["POST"])
-@require_auth_api
-@require_guild_access
-async def queue_add(guild_id: int):
-    cog = _get_music_cog()
-    if not cog:
-        return jsonify({"error": "Music cog not loaded"}), 500
-    data = await request.get_json()
-    query = data.get("query", "")
+@guild_action
+async def queue_add(guild, cog, body):
+    query = str(body.get("query", "")).strip()
     if not query:
-        return jsonify({"error": "Missing query"}), 400
-    requester = session["user"]["username"]
-    title = data.get("title") or None
-    thumbnail = data.get("thumbnail") or None
-    duration = data.get("duration") or None
-    result = await cog.api_add_to_queue(guild_id, query, requester, top=False, title=title, thumbnail=thumbnail, duration=duration)
-    return jsonify(result)
-
-
-@api_bp.route("/guild/<int:guild_id>/queue/add-top", methods=["POST"])
-@require_auth_api
-@require_guild_access
-async def queue_add_top(guild_id: int):
-    cog = _get_music_cog()
-    if not cog:
-        return jsonify({"error": "Music cog not loaded"}), 500
-    data = await request.get_json()
-    query = data.get("query", "")
-    if not query:
-        return jsonify({"error": "Missing query"}), 400
-    requester = session["user"]["username"]
-    title = data.get("title") or None
-    thumbnail = data.get("thumbnail") or None
-    duration = data.get("duration") or None
-    result = await cog.api_add_to_queue(guild_id, query, requester, top=True, title=title, thumbnail=thumbnail, duration=duration)
-    return jsonify(result)
+        raise PlayerError("Type something to play.")
+    # Members in voice are cached, so this finds the user if they're in a voice channel
+    member = guild.get_member(int(session["user"]["id"]))
+    if member and member.voice:
+        await cog.join(member)
+    elif not guild.voice_client:
+        raise PlayerError("Join a voice channel in this server first, then try again.")
+    songs, _ = await cog.resolve_query(query, session["user"]["username"], int(session["user"]["id"]))
+    started = await cog.enqueue(guild, songs, top=bool(body.get("top")))
+    if started and len(songs) == 1:
+        return f"Now playing {songs[0].title}"
+    return f"Added {len(songs)} tracks" if len(songs) > 1 else f"Added {songs[0].title}"
 
 
 @api_bp.route("/guild/<int:guild_id>/queue/move", methods=["POST"])
-@require_auth_api
-@require_guild_access
-async def queue_move(guild_id: int):
-    cog = _get_music_cog()
-    if not cog:
-        return jsonify({"error": "Music cog not loaded"}), 500
-    data = await request.get_json()
-    from_idx = data.get("from", 0)
-    to_idx = data.get("to", 0)
-    result = await cog.api_move(guild_id, from_idx, to_idx)
-    return jsonify(result)
+@guild_action
+async def queue_move(guild, cog, body):
+    return await cog.move(guild, int(body["from"]), int(body["to"]))
 
 
 @api_bp.route("/guild/<int:guild_id>/queue/shuffle", methods=["POST"])
-@require_auth_api
-@require_guild_access
-async def queue_shuffle(guild_id: int):
-    cog = _get_music_cog()
-    if not cog:
-        return jsonify({"error": "Music cog not loaded"}), 500
-    result = await cog.api_shuffle(guild_id)
-    return jsonify(result)
+@guild_action
+async def queue_shuffle(guild, cog, body):
+    return await cog.shuffle(guild)
+
+
+@api_bp.route("/guild/<int:guild_id>/queue/clear", methods=["POST"])
+@guild_action
+async def queue_clear(guild, cog, body):
+    return await cog.clear_queue(guild)
 
 
 @api_bp.route("/guild/<int:guild_id>/queue/<int:index>", methods=["DELETE"])
-@require_auth_api
-@require_guild_access
-async def queue_remove(guild_id: int, index: int):
-    cog = _get_music_cog()
-    if not cog:
-        return jsonify({"error": "Music cog not loaded"}), 500
-    result = await cog.api_remove(guild_id, index)
-    return jsonify(result)
+@guild_action
+async def queue_remove(guild, cog, body, index: int):
+    return await cog.remove(guild, index)
 
 
 # --- Search ---
 
 @api_bp.route("/guild/<int:guild_id>/search")
-@require_auth_api
-@require_guild_access
-async def search(guild_id: int):
-    cog = _get_music_cog()
-    if not cog:
-        return jsonify({"error": "Music cog not loaded"}), 500
-    query = request.args.get("q", "")
-    if not query:
-        return jsonify([])
-    results = await cog.api_search(query)
-    return jsonify(results)
+@guild_action
+async def search(guild, cog, body):
+    from utils import youtube
+
+    query = request.args.get("q", "").strip()
+    if len(query) < 2:
+        return []
+    return await youtube.search(query, count=8)
 
 
 # --- Settings ---
 
 @api_bp.route("/guild/<int:guild_id>/settings", methods=["POST"])
-@require_auth_api
-@require_guild_access
-async def update_settings(guild_id: int):
-    cog = _get_music_cog()
-    if not cog:
-        return jsonify({"error": "Music cog not loaded"}), 500
-    data = await request.get_json()
-    result = await cog.api_update_settings(guild_id, data)
-    return jsonify(result)
+@guild_action
+async def update_settings(guild, cog, body):
+    if "twenty_four_seven" in body:
+        return await cog.set_247(guild, bool(body["twenty_four_seven"]))
+    return {"status": "ok"}

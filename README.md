@@ -5,55 +5,61 @@ A feature-rich Discord music bot built with Python that supports YouTube, Spotif
 ## Features
 
 - **Multi-platform support** — Play from YouTube, Spotify, SoundCloud, and more
-- **Queue management** — Add, remove, shuffle, and loop tracks
-- **Playback controls** — Play, pause, resume, skip, seek, and volume adjustment
-- **Spotify integration** — Automatically resolves Spotify tracks, playlists, and albums
-- **YouTube playlists** — Queue entire playlists at once
-- **Audio filters** — Nightcore, vaporwave, bass boost, speed, tremolo, vibrato, 8D, and more via FFmpeg
-- **Search** — Search YouTube and pick from top 5 results with a dropdown menu
-- **Lyrics** — Fetch and display lyrics for the current track via Genius
-- **Now playing** — Track info with a live progress bar and playback buttons
-- **Play top** — Add songs to the front of the queue
+- **Original-quality audio** — YouTube's Opus audio is passed straight through to Discord without re-encoding when no effect is active and volume is 100%
+- **Instant starts** — The next track is resolved and cached while the current one plays; cached tracks start with no network round-trip
+- **Stutter-resistant** — yt-dlp runs in separate worker processes so it never competes with the audio thread, and cached tracks play from disk
+- **Queue management** — Add, remove, move, shuffle, clear, loop, and go back to previous tracks
+- **Playback controls** — Play, pause, resume, skip, previous, seek, and volume, with near-seamless restarts for seek/volume/effects
+- **Spotify integration** — Tracks, playlists (no 100-track limit), and albums, matched to official audio on YouTube Music
+- **YouTube playlists** — Queue entire playlists at once (mix/radio links play just the linked video)
+- **Audio effects** — Nightcore, vaporwave, bass boost, speed, tremolo, vibrato, and 8D via FFmpeg
+- **Search** — Search YouTube and pick from the top results with a dropdown menu
+- **Lyrics** — From [LRCLIB](https://lrclib.net) (no key needed), with Genius as an optional fallback
+- **Now playing** — Track card with playback buttons, an up-next preview, and a live progress bar in `/nowplaying`
 - **24/7 mode** — Keep the bot in the voice channel indefinitely
 - **DJ role** — Restrict destructive commands to users with a "DJ" role
-- **Vote skip** — Majority vote required to skip when 3+ users are in the channel
-- **Audio caching** — Downloads audio to disk for instant replay of repeated songs, with LRU eviction
-- **Auto-disconnect** — Leaves the voice channel after 3 minutes of inactivity
+- **Vote skip** — Majority vote to skip when 3+ people are listening (DJs and the song's requester skip instantly)
+- **Audio caching** — Tracks are cached to disk in the background for instant, network-free replays, with LRU eviction
+- **Auto-disconnect** — Leaves after 10 minutes idle, or 3 minutes after everyone leaves the channel
 - **Voice channel status** — Displays the current track in the voice channel status
-- **Slash commands** — All commands work as both `!prefix` and `/slash` commands
-- **Web dashboard** — Spotify-like browser control panel with 3-panel layout, real-time WebSocket updates, and full playback control (optional, requires Discord OAuth2 setup)
+- **Slash commands** — All commands work as both `!prefix` and `/slash` commands, with autocomplete for `/play`
+- **Web dashboard** — Real-time browser control panel with live artwork, drag-and-drop queue, and search (optional, requires Discord OAuth2 setup)
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `!play <url/search>` | Play a song or add it to the queue |
-| `!playtop <url/search>` | Add a song to the top of the queue |
-| `!skip` | Skip the current track (vote skip with 3+ users) |
-| `!pause` | Pause playback |
-| `!resume` | Resume playback |
+| `!play <url/search>` | Play a song or add it to the queue (alias: `!p`) |
+| `!playtop <url/search>` | Add a song to the top of the queue (alias: `!pt`) |
+| `!search <query>` | Search YouTube and pick a result |
+| `!skip` | Skip the current track (vote skip with 3+ listeners) |
+| `!previous` | Go back to the previous track (aliases: `!back`, `!prev`) |
+| `!pause` / `!resume` | Pause or resume playback |
+| `!seek <timestamp>` | Jump to a position (e.g. `!seek 1:30`) |
 | `!stop` | Clear the queue and disconnect |
 | `!disconnect` | Disconnect from the voice channel (aliases: `!dc`, `!leave`) |
-| `!queue` | Show the current queue |
-| `!volume <0-100>` | Adjust the volume |
-| `!nowplaying` | Show current track with progress bar and buttons |
-| `!loop <off/track/queue>` | Set loop mode |
+| `!queue [page]` | Show the queue (alias: `!q`) |
+| `!nowplaying` | Show the current track with a progress bar (alias: `!np`) |
+| `!volume [0-100]` | Show or set the volume. 100 gives the best quality |
+| `!loop [off/track/queue]` | Set loop mode, or cycle it with no argument |
 | `!shuffle` | Randomize the queue |
-| `!seek <timestamp>` | Jump to a position (e.g. `!seek 1:30`) |
 | `!remove <position>` | Remove a song from the queue |
-| `!search <query>` | Search YouTube and pick a result |
+| `!move <from> <to>` | Move a song to a different position |
+| `!clear` | Clear the queue but keep the current song playing |
 | `!lyrics` | Show lyrics for the current track |
 | `!247` | Toggle 24/7 mode (stay in voice channel) |
-| `!nightcore` | Apply nightcore effect (speed up + pitch up) |
-| `!vaporwave` | Apply vaporwave effect (slow down + pitch down) |
+| `!nightcore` | Nightcore effect (speed up + pitch up) |
+| `!vaporwave` | Vaporwave effect (slow down + pitch down) |
 | `!bassboost` | Boost bass frequencies |
 | `!speed <0.5-2.0>` | Change playback speed without pitch change |
-| `!tremolo` | Apply tremolo effect (volume oscillation) |
-| `!vibrato` | Apply vibrato effect (pitch oscillation) |
-| `!8d` | Apply 8D audio effect (stereo rotation) |
+| `!tremolo` | Tremolo effect (volume oscillation) |
+| `!vibrato` | Vibrato effect (pitch oscillation) |
+| `!8d` | 8D audio effect (stereo rotation) |
 | `!cleareffect` | Remove all audio effects |
 | `!cachestats` | Show audio cache statistics (files, size, hit rate) |
 | `!clearcache` | Clear all cached audio files (DJ role) |
+
+Playback controls (`skip`, `pause`, `seek`, effects, and so on) require you to be in the bot's voice channel.
 
 ## Setup
 
@@ -61,9 +67,11 @@ A feature-rich Discord music bot built with Python that supports YouTube, Spotif
 
 - Python 3.10+
 - ffmpeg
+- [Deno](https://deno.com): yt-dlp needs a JavaScript runtime for full YouTube support (the Docker image includes it)
 
 ```bash
 sudo apt install ffmpeg
+curl -fsSL https://deno.land/install.sh | sh
 ```
 
 ### Installation
@@ -108,7 +116,7 @@ cp .env.example .env
 1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
 2. Create an app and copy the **Client ID** and **Client Secret**
 
-**Genius API Token (optional):**
+**Genius API Token (optional, lyrics fallback):**
 1. Go to [Genius API Clients](https://genius.com/api-clients)
 2. Create a new API client and generate an access token
 
@@ -156,20 +164,26 @@ docker compose down              # stop the bot
 docker compose up -d --build     # rebuild after code changes
 ```
 
-## Audio Cache
+## Audio Quality & Caching
 
-The bot caches downloaded audio files to disk so repeated songs play instantly without re-fetching. Livestreams and tracks over 30 minutes are streamed directly and not cached. When the cache exceeds its size limit, the least recently played files are evicted automatically.
+- **Passthrough:** YouTube serves Opus, the same codec Discord uses. When volume is 100% and no effect is active, the original packets go to Discord untouched. Changing the volume or adding an effect makes FFmpeg re-encode once, at your voice channel's bitrate (minimum 128 kbps). For the best quality, leave the bot at 100% and adjust it per-user in Discord (right-click the bot, then User Volume).
+- **Stream first, cache in the background:** A track's first play starts streaming immediately while a copy downloads to the cache. Later plays read from disk: instant start, no network hiccups.
+- **Prefetch:** While a song plays, the next one is resolved and cached, so the transition is instant.
+
+Livestreams and tracks longer than `MAX_CACHE_DURATION` are always streamed. When the cache exceeds its size limit, the least recently played files are evicted.
 
 | Environment Variable | Default | Description |
 |---|---|---|
-| `CACHE_LIMIT_MB` | `2048` | Maximum cache size in MB |
+| `CACHE_LIMIT_MB` | `2048` | Maximum cache size in MB (`0` disables caching) |
 | `MAX_CACHE_DURATION` | `1800` | Max track duration (seconds) to cache |
 
-The volume mount (`./cache:/app/cache`) in Docker Compose ensures the cache persists across container restarts.
+The volume mount (`./cache:/app/cache`) in Docker Compose persists the cache and per-server settings (volume, 24/7) across container restarts.
 
 ## DJ Role
 
-If a role named **DJ** exists in your server, only users with that role (or admins) can use: `skip`, `stop`, `volume`, `remove`, `shuffle`, `clearcache`. If no DJ role exists, all commands are unrestricted.
+If a role named **DJ** exists in your server, only users with that role (or admins) can use: `stop`, `disconnect`, `volume`, `remove`, `move`, `clear`, `shuffle`, `247`, `clearcache`. If no DJ role exists, these are unrestricted.
+
+Skipping works the same either way: DJs, admins, and whoever requested the current song skip instantly; with 3+ listeners, everyone else votes (majority wins).
 
 ## Web Dashboard
 
@@ -194,21 +208,18 @@ The bot includes an optional web dashboard for controlling music playback from t
 
 ### Dashboard Features
 
-- **Spotify-like layout** — 3-panel grid with sidebar, main content area, and slide-out queue panel
-- **Bottom controller bar** — Track info, playback controls, seek bar, volume, and effects in a fixed bar
-- **Dark theme** — Pure black background with Discord accent colors and Material icons
-- Login with Discord OAuth2
-- Select any server where both you and the bot are members
-- View current track with album art and live seek bar
-- Play/pause, skip, stop, seek, volume, loop mode
-- Audio filter selection (nightcore, vaporwave, bass boost, etc.)
-- Queue management: view, remove, shuffle, drag-and-drop reorder
-- Search and add songs from the header search bar
-- Guild settings (24/7 mode)
-- Real-time sync across multiple tabs and Discord commands
-- Responsive design — works on desktop, tablet, and mobile
+- Login with Discord OAuth2; sessions last 30 days
+- Discord-style server rail showing which servers are playing
+- Now-playing view with large artwork and an ambient background that follows the current song
+- Play/pause, skip, previous, stop, seek, volume, loop, and 24/7 mode
+- One-click effect chips (bass boost, nightcore, vaporwave, 8D, speed, and more)
+- Search with live results and keyboard navigation; add to the end or play next
+- Queue: drag-and-drop reorder, play next, remove, shuffle, clear
+- Real-time sync across tabs, devices, and Discord commands
+- Keyboard shortcuts: `Space` play/pause, `Shift+→` skip, `Shift+←` previous, `/` search
+- Responsive: works on desktop, tablet, and mobile
 
-**Note:** The dashboard cannot start playback from scratch — the bot must already be in a voice channel (joined via Discord). Once in voice, all controls work from the browser.
+If you're in a voice channel, adding a song from the dashboard makes the bot join you. Otherwise the bot must already be in a voice channel.
 
 ### Remote Access
 

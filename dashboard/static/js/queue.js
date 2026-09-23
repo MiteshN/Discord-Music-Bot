@@ -1,122 +1,116 @@
 /**
- * Queue panel UI with "Now Playing" section, queue list, remove and drag-and-drop reorder.
+ * Queue panel: list with drag-and-drop reordering, move-to-top and remove.
  */
 const Queue = {
-    items: [],
+    signature: "",
+    dragFrom: null,
 
     init() {
-        document.getElementById("btn-shuffle-queue").addEventListener("click", () => {
-            if (App.guildId) API.shuffleQueue(App.guildId);
+        this.list = document.getElementById("queue-list");
+        this.empty = document.getElementById("queue-empty");
+        this.summary = document.getElementById("queue-summary");
+
+        document.getElementById("btn-shuffle").addEventListener("click", () => API.action("queue/shuffle"));
+        document.getElementById("btn-clear").addEventListener("click", () => {
+            if (confirm("Clear the whole queue?")) API.action("queue/clear");
+        });
+
+        // Event delegation: one set of listeners for the whole list
+        this.list.addEventListener("click", (e) => {
+            const btn = e.target.closest("[data-action]");
+            if (!btn) return;
+            const index = +btn.closest(".q-item").dataset.index;
+            if (btn.dataset.action === "remove") API.removeFromQueue(index);
+            if (btn.dataset.action === "top") API.action("queue/move", { from: index, to: 0 });
+        });
+        this.list.addEventListener("dragstart", (e) => {
+            const item = e.target.closest(".q-item");
+            if (!item) return;
+            this.dragFrom = +item.dataset.index;
+            item.classList.add("dragging");
+            e.dataTransfer.effectAllowed = "move";
+        });
+        this.list.addEventListener("dragend", () => {
+            this.dragFrom = null;
+            this.list.querySelectorAll(".dragging, .drop-before, .drop-after")
+                .forEach(el => el.classList.remove("dragging", "drop-before", "drop-after"));
+        });
+        this.list.addEventListener("dragover", (e) => {
+            const item = e.target.closest(".q-item");
+            if (!item || this.dragFrom === null) return;
+            e.preventDefault();
+            const after = +item.dataset.index > this.dragFrom;
+            this.list.querySelectorAll(".drop-before, .drop-after").forEach(el => el.classList.remove("drop-before", "drop-after"));
+            item.classList.add(after ? "drop-after" : "drop-before");
+        });
+        this.list.addEventListener("drop", (e) => {
+            const item = e.target.closest(".q-item");
+            if (!item || this.dragFrom === null) return;
+            e.preventDefault();
+            const to = +item.dataset.index;
+            if (to !== this.dragFrom) API.action("queue/move", { from: this.dragFrom, to });
         });
     },
 
-    update(queue) {
-        this.items = queue || [];
-        this._render();
+    render(s) {
+        const total = s.queue_length || 0;
+        this.summary.textContent = total
+            ? `${total} track${total === 1 ? "" : "s"}${s.queue_duration ? ` · ${fmtLong(s.queue_duration)}` : ""}`
+            : "Empty";
+        document.getElementById("tab-count").textContent = total || "";
+        document.getElementById("btn-shuffle").disabled = total < 2;
+        document.getElementById("btn-clear").disabled = total === 0;
+
+        // Skip the DOM rebuild if nothing visible changed
+        const signature = JSON.stringify([s.queue, total]);
+        if (signature === this.signature) return;
+        this.signature = signature;
+
+        this.empty.hidden = total > 0;
+        this.list.hidden = total === 0;
+        this.list.replaceChildren(...s.queue.map((song, i) => this._item(song, i)));
+        if (total > s.queue.length) {
+            const more = document.createElement("li");
+            more.className = "queue-more";
+            more.textContent = `+ ${total - s.queue.length} more`;
+            this.list.append(more);
+        }
     },
 
-    updateNowPlaying(song) {
-        const section = document.getElementById("queue-now-playing");
-        const container = document.getElementById("queue-current");
-
-        if (!song) {
-            section.style.display = "none";
-            return;
-        }
-
-        section.style.display = "block";
-        container.innerHTML = `
-            ${song.thumbnail
-                ? `<img class="queue-current-thumb" src="${this._esc(song.thumbnail)}" alt="">`
-                : '<div class="queue-current-thumb"></div>'}
-            <div class="queue-current-info">
-                <div class="queue-current-title">${this._esc(song.title)}</div>
-                <div class="queue-current-meta">
-                    ${song.duration ? Player._formatTime(song.duration) : "Live"} &middot; ${this._esc(song.requester)}
-                </div>
+    _item(song, i) {
+        const li = document.createElement("li");
+        li.className = "q-item";
+        li.draggable = true;
+        li.dataset.index = i;
+        li.innerHTML = `
+            <span class="q-index">${i + 1}</span>
+            <span class="icon q-handle">drag_indicator</span>
+            <img class="q-thumb" alt="" loading="lazy">
+            <div class="q-info">
+                <div class="q-title"></div>
+                <div class="q-meta"></div>
             </div>
-        `;
-    },
-
-    _render() {
-        const list = document.getElementById("queue-list");
-        const countEl = document.getElementById("queue-count");
-
-        if (!this.items.length) {
-            list.innerHTML = '<li class="queue-empty">Queue is empty</li>';
-            countEl.textContent = "";
-            return;
-        }
-
-        countEl.textContent = `(${this.items.length})`;
-
-        list.innerHTML = this.items.map((song, i) => {
-            const thumb = song.thumbnail || this._ytThumb(song.url);
-            const duration = song.duration ? Player._formatTime(song.duration) : "Queued";
-            return `
-            <li class="queue-item" draggable="true" data-index="${i}">
-                <span class="queue-item-index">${i + 1}</span>
-                ${thumb
-                    ? `<img class="queue-item-thumb" src="${this._esc(thumb)}" alt="">`
-                    : '<div class="queue-item-thumb"></div>'}
-                <div class="queue-item-info">
-                    <div class="queue-item-title">${this._esc(song.title)}</div>
-                    <div class="queue-item-meta">
-                        ${duration} &middot; ${this._esc(song.requester)}
-                    </div>
-                </div>
-                <div class="queue-item-actions">
-                    <button class="queue-item-btn" data-remove="${i}" title="Remove">
-                        <span class="material-symbols-outlined">close</span>
-                    </button>
-                </div>
-            </li>`;
-        }).join("");
-
-        // Remove buttons
-        list.querySelectorAll("[data-remove]").forEach(btn => {
-            btn.addEventListener("click", (e) => {
-                e.stopPropagation();
-                const idx = parseInt(btn.dataset.remove);
-                if (App.guildId) API.removeFromQueue(App.guildId, idx);
-            });
-        });
-
-        // Drag and drop
-        let dragIdx = null;
-        list.querySelectorAll(".queue-item").forEach(item => {
-            item.addEventListener("dragstart", (e) => {
-                dragIdx = parseInt(item.dataset.index);
-                item.classList.add("dragging");
-                e.dataTransfer.effectAllowed = "move";
-            });
-            item.addEventListener("dragend", () => {
-                item.classList.remove("dragging");
-                dragIdx = null;
-            });
-            item.addEventListener("dragover", (e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = "move";
-            });
-            item.addEventListener("drop", (e) => {
-                e.preventDefault();
-                const toIdx = parseInt(item.dataset.index);
-                if (dragIdx !== null && dragIdx !== toIdx && App.guildId) {
-                    API.moveInQueue(App.guildId, dragIdx, toIdx);
-                }
-            });
-        });
-    },
-
-    _ytThumb(url) {
-        if (!url) return null;
-        const m = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([A-Za-z0-9_-]{11})/);
-        return m ? `https://i.ytimg.com/vi/${m[1]}/mqdefault.jpg` : null;
-    },
-
-    _esc(str) {
-        const el = document.createElement("span");
-        el.textContent = str || "";
-        return el.innerHTML;
+            <div class="q-actions">
+                ${i > 0 ? '<button class="q-btn" data-action="top" title="Play next"><span class="icon">vertical_align_top</span></button>' : ""}
+                <button class="q-btn danger" data-action="remove" title="Remove"><span class="icon">close</span></button>
+            </div>`;
+        // Small YouTube thumbnails always exist (maxres ones don't); keep other art such as Spotify covers
+        const thumb = song.thumbnail && !song.thumbnail.includes("i.ytimg.com")
+            ? song.thumbnail : (ytThumb(song.url) || song.thumbnail);
+        if (thumb) li.querySelector(".q-thumb").src = thumb;
+        li.querySelector(".q-title").textContent = song.title;
+        li.querySelector(".q-meta").textContent = `${song.duration ? fmt(song.duration) : "—"} · ${song.requester}`;
+        return li;
     },
 };
+
+function ytThumb(url, size = "mqdefault") {
+    const m = (url || "").match(/(?:v=|youtu\.be\/)([A-Za-z0-9_-]{11})/);
+    return m ? `https://i.ytimg.com/vi/${m[1]}/${size}.jpg` : "";
+}
+
+function fmtLong(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.round((seconds % 3600) / 60);
+    return h ? `${h} hr ${m} min` : `${m} min`;
+}

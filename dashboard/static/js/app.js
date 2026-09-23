@@ -1,201 +1,135 @@
 /**
- * Main app: auth check, guild selector (sidebar), page routing, queue toggle, toast system.
+ * App shell: user + server rail, server selection, mobile tabs, keyboard shortcuts, toasts.
  */
 const App = {
     guildId: null,
     guilds: [],
-    currentPage: "home",
-    queueOpen: true,
-    menuOpen: false,
 
     async init() {
-        // Check auth
-        const me = await API.getMe();
-        if (!me) return;
-        document.getElementById("user-info").textContent = me.username;
-
-        // Load guilds
-        this.guilds = await API.getGuilds() || [];
-        this._populateGuilds();
-
-        // Init components
         Player.init();
         Queue.init();
         Search.init();
 
-        // Navigation
-        document.querySelectorAll(".nav-item").forEach(item => {
-            item.addEventListener("click", () => {
-                this._navigateTo(item.dataset.page);
-            });
-        });
+        const me = await API.me();
+        if (!me) return;
+        const avatar = document.getElementById("user-avatar");
+        avatar.title = `${me.username} · Log out`;
+        if (me.avatar) avatar.style.backgroundImage = `url(https://cdn.discordapp.com/avatars/${me.id}/${me.avatar}.png?size=80)`;
 
-        // Hamburger menu
-        document.getElementById("hamburger-btn").addEventListener("click", () => {
-            this._toggleMenu();
-        });
-        document.getElementById("sidebar-overlay").addEventListener("click", () => {
-            this._toggleMenu(false);
-        });
+        this.guilds = (await API.guilds()) || [];
+        this._renderGuilds();
 
-        // Queue toggle
-        document.getElementById("btn-queue-toggle").addEventListener("click", () => {
-            this._toggleQueue();
-        });
+        document.querySelectorAll("#tabs .tab").forEach(tab =>
+            tab.addEventListener("click", () => this._setTab(tab.dataset.tab)));
+        this._setTab("player");
 
-        // Restore last guild from localStorage
-        const lastGuild = localStorage.getItem("dashboard_guild");
-        if (lastGuild && this.guilds.some(g => g.id === lastGuild)) {
-            this._selectGuild(lastGuild);
+        document.addEventListener("keydown", (e) => this._shortcut(e));
+
+        let saved = null;
+        try { saved = localStorage.getItem("mugetsu.guild"); } catch { /* storage unavailable */ }
+        const initial = this.guilds.find(g => g.id === saved) || this.guilds.find(g => g.playing)
+            || (this.guilds.length === 1 ? this.guilds[0] : null);
+        if (initial) this.selectGuild(initial.id);
+        else if (!this.guilds.length) {
+            document.querySelector("#no-guild h2").textContent = "No shared servers";
+            document.querySelector("#no-guild p").textContent = "You aren't in any server this bot is in yet.";
         }
-
-        // Restore queue panel state
-        const queueState = localStorage.getItem("dashboard_queue_open");
-        if (queueState === "false") {
-            this.queueOpen = false;
-            document.getElementById("queue-container").classList.add("collapsed");
-        }
-
-        // Settings: 24/7 toggle
-        document.getElementById("setting-247").addEventListener("change", (e) => {
-            if (this.guildId) {
-                API.updateSettings(this.guildId, { twenty_four_seven: e.target.checked });
-            }
-        });
     },
 
-    _populateGuilds() {
+    _renderGuilds() {
         const list = document.getElementById("guild-list");
-        this.guilds.forEach(g => {
-            const li = document.createElement("li");
-            li.className = "guild-item";
-            li.dataset.guildId = g.id;
-
-            const icon = document.createElement("div");
-            icon.className = "guild-icon";
+        list.replaceChildren(...this.guilds.map(g => {
+            const btn = document.createElement("button");
+            btn.className = "guild" + (g.playing ? " playing" : "");
+            btn.dataset.guildId = g.id;
+            btn.setAttribute("aria-label", g.name);
             if (g.icon) {
                 const img = document.createElement("img");
                 img.src = g.icon;
                 img.alt = "";
-                icon.appendChild(img);
+                btn.append(img);
             } else {
-                icon.textContent = g.name.charAt(0).toUpperCase();
+                btn.append(g.name.split(/\s+/).map(w => w[0]).join("").slice(0, 3));
             }
-
-            const name = document.createElement("span");
-            name.textContent = g.name;
-
-            li.appendChild(icon);
-            li.appendChild(name);
-            li.addEventListener("click", () => this._selectGuild(g.id));
-            list.appendChild(li);
-        });
+            const live = document.createElement("span");
+            live.className = "guild-live";
+            const tip = document.createElement("span");
+            tip.className = "guild-tip";
+            tip.textContent = g.name;
+            btn.append(live, tip);
+            btn.addEventListener("click", () => this.selectGuild(g.id));
+            return btn;
+        }));
     },
 
-    async _selectGuild(guildId) {
-        if (!guildId) {
-            this.guildId = null;
-            WS.disconnect();
-            document.getElementById("no-guild-msg").style.display = "flex";
-            document.getElementById("page-home").style.display = "none";
-            document.getElementById("page-settings").style.display = "none";
-            this._clearGuildActive();
-            return;
-        }
-
+    selectGuild(guildId) {
+        if (guildId === this.guildId) return;
         this.guildId = guildId;
-        localStorage.setItem("dashboard_guild", guildId);
+        try { localStorage.setItem("mugetsu.guild", guildId); } catch { /* storage unavailable */ }
 
-        // Update active state in sidebar
-        this._clearGuildActive();
-        const item = document.querySelector(`.guild-item[data-guild-id="${guildId}"]`);
-        if (item) item.classList.add("active");
+        const guild = this.guilds.find(g => g.id === guildId);
+        document.getElementById("guild-name").textContent = guild ? guild.name : "Mugetsu";
+        document.getElementById("voice-channel").textContent = "Connecting…";
+        document.querySelectorAll(".guild").forEach(el => el.classList.toggle("active", el.dataset.guildId === guildId));
 
-        // Show content
-        document.getElementById("no-guild-msg").style.display = "none";
-        this._navigateTo(this.currentPage);
+        document.getElementById("no-guild").hidden = true;
+        document.getElementById("player").hidden = false;
+        document.getElementById("queue").hidden = false;
+        document.getElementById("tabs").hidden = false;
 
-        // Close mobile menu
-        this._toggleMenu(false);
-
-        // Load initial state
-        const [player, queue, settings] = await Promise.all([
-            API.getPlayer(guildId),
-            API.getQueue(guildId),
-            API.getSettings(guildId),
-        ]);
-
-        if (player) Player.updateFull(player);
-        if (queue) Queue.update(queue);
-        if (settings) {
-            document.getElementById("setting-247").checked = settings.twenty_four_seven;
-        }
-
-        // Connect WebSocket
+        Player.reset();
+        Queue.signature = "";
         WS.connect(guildId);
     },
 
-    _clearGuildActive() {
-        document.querySelectorAll(".guild-item").forEach(el => el.classList.remove("active"));
+    onState(s) {
+        Player.render(s);
+        Queue.render(s);
+        document.getElementById("voice-channel").textContent = s.in_voice
+            ? `Connected to ${s.channel}` : "Not in a voice channel";
+        const railItem = document.querySelector(`.guild[data-guild-id="${this.guildId}"]`);
+        railItem?.classList.toggle("playing", !!s.current && s.in_voice);
     },
 
-    _navigateTo(page) {
-        this.currentPage = page;
+    _setTab(tab) {
+        document.getElementById("stage").dataset.tab = tab;
+        document.querySelectorAll("#tabs .tab").forEach(t => t.classList.toggle("active", t.dataset.tab === tab));
+    },
 
-        // Update nav active states
-        document.querySelectorAll(".nav-item").forEach(el => el.classList.remove("active"));
-        const navItem = document.querySelector(`.nav-item[data-page="${page}"]`);
-        if (navItem) navItem.classList.add("active");
-
-        // Show/hide pages
-        document.querySelectorAll(".page").forEach(el => { el.style.display = "none"; });
-        if (this.guildId) {
-            const pageEl = document.getElementById(`page-${page}`);
-            if (pageEl) pageEl.style.display = "flex";
+    _shortcut(e) {
+        const typing = e.target.closest("input, textarea, select") && e.target.type !== "range";
+        if (e.key === "/" && !typing) {
+            e.preventDefault();
+            document.getElementById("search-input").focus();
+            return;
         }
-    },
-
-    _toggleQueue(force) {
-        const queue = document.getElementById("queue-container");
-        this.queueOpen = force !== undefined ? force : !this.queueOpen;
-
-        if (this.queueOpen) {
-            queue.classList.remove("collapsed");
-            queue.classList.add("open");
-        } else {
-            queue.classList.add("collapsed");
-            queue.classList.remove("open");
-        }
-        localStorage.setItem("dashboard_queue_open", this.queueOpen);
-    },
-
-    _toggleMenu(force) {
-        const menu = document.getElementById("menu-container");
-        const overlay = document.getElementById("sidebar-overlay");
-        this.menuOpen = force !== undefined ? force : !this.menuOpen;
-
-        if (this.menuOpen) {
-            menu.classList.add("open");
-            overlay.classList.add("visible");
-        } else {
-            menu.classList.remove("open");
-            overlay.classList.remove("visible");
+        if (typing || e.ctrlKey || e.metaKey || e.altKey || !this.guildId) return;
+        if (e.code === "Space") {
+            e.preventDefault();
+            document.getElementById("btn-play").click();
+        } else if (e.shiftKey && e.key === "ArrowRight") {
+            document.getElementById("btn-skip").click();
+        } else if (e.shiftKey && e.key === "ArrowLeft") {
+            document.getElementById("btn-prev").click();
         }
     },
 
     toast(message, type = "info") {
-        const container = document.getElementById("toast-container");
+        const icons = { info: "info", success: "check_circle", error: "error" };
+        const container = document.getElementById("toasts");
         const toast = document.createElement("div");
         toast.className = `toast ${type}`;
-        toast.textContent = message;
-        container.appendChild(toast);
+        const icon = document.createElement("span");
+        icon.className = "icon filled";
+        icon.textContent = icons[type] || "info";
+        toast.append(icon, message);
+        container.append(toast);
+        while (container.children.length > 3) container.firstChild.remove();
         setTimeout(() => {
-            toast.style.opacity = "0";
-            toast.style.transition = "opacity 0.3s";
+            toast.classList.add("leaving");
             setTimeout(() => toast.remove(), 300);
-        }, 4000);
+        }, type === "error" ? 5000 : 3000);
     },
 };
 
-// Boot
 document.addEventListener("DOMContentLoaded", () => App.init());

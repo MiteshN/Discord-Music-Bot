@@ -1,11 +1,13 @@
 """Discord OAuth2 authentication for the dashboard."""
 
+import functools
 import logging
 import os
-import functools
+import secrets
+from urllib.parse import urlencode
 
 import aiohttp
-from quart import Blueprint, redirect, request, session, url_for, jsonify
+from quart import Blueprint, jsonify, redirect, request, session
 
 log = logging.getLogger("bot.dashboard.auth")
 
@@ -14,24 +16,8 @@ auth_bp = Blueprint("auth", __name__)
 DISCORD_API = "https://discord.com/api/v10"
 CLIENT_ID = os.getenv("DISCORD_CLIENT_ID", "")
 CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET", "")
-DASHBOARD_URL = os.getenv("DASHBOARD_URL", "http://localhost:8080")
-SCOPES = "identify guilds"
-
-
-def _redirect_uri() -> str:
-    return f"{DASHBOARD_URL}/callback"
-
-
-def require_auth(func):
-    """Decorator: redirect to login if not authenticated."""
-
-    @functools.wraps(func)
-    async def wrapper(*args, **kwargs):
-        if "user" not in session:
-            return redirect(url_for("auth.login"))
-        return await func(*args, **kwargs)
-
-    return wrapper
+DASHBOARD_URL = os.getenv("DASHBOARD_URL", "http://localhost:8080").rstrip("/")
+REDIRECT_URI = f"{DASHBOARD_URL}/callback"
 
 
 def require_auth_api(func):
@@ -48,69 +34,63 @@ def require_auth_api(func):
 
 @auth_bp.route("/login")
 async def login():
-    params = (
-        f"client_id={CLIENT_ID}"
-        f"&redirect_uri={_redirect_uri()}"
-        f"&response_type=code"
-        f"&scope={SCOPES.replace(' ', '%20')}"
-    )
+    # The state value ties the callback to this browser, preventing login CSRF
+    state = secrets.token_urlsafe(24)
+    session["oauth_state"] = state
+    params = urlencode({
+        "client_id": CLIENT_ID,
+        "redirect_uri": REDIRECT_URI,
+        "response_type": "code",
+        "scope": "identify guilds",
+        "state": state,
+    })
     return redirect(f"https://discord.com/oauth2/authorize?{params}")
 
 
 @auth_bp.route("/callback")
 async def callback():
     code = request.args.get("code")
-    if not code:
-        return "Missing code parameter", 400
+    state = request.args.get("state")
+    expected = session.pop("oauth_state", None)
+    if not code or not state or not expected or not secrets.compare_digest(state, expected):
+        return redirect("/")
 
-    # Exchange code for token
-    async with aiohttp.ClientSession() as http:
-        token_resp = await http.post(
+    timeout = aiohttp.ClientTimeout(total=15)
+    async with aiohttp.ClientSession(timeout=timeout) as http:
+        async with http.post(
             f"{DISCORD_API}/oauth2/token",
             data={
                 "client_id": CLIENT_ID,
                 "client_secret": CLIENT_SECRET,
                 "grant_type": "authorization_code",
                 "code": code,
-                "redirect_uri": _redirect_uri(),
+                "redirect_uri": REDIRECT_URI,
             },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
-        if token_resp.status != 200:
-            log.error("OAuth2 token exchange failed: %s", await token_resp.text())
-            return "Authentication failed", 400
-        tokens = await token_resp.json()
+        ) as resp:
+            if resp.status != 200:
+                log.error("OAuth2 token exchange failed: %s", await resp.text())
+                return "Authentication failed", 400
+            access_token = (await resp.json())["access_token"]
 
-        access_token = tokens["access_token"]
+        headers = {"Authorization": f"Bearer {access_token}"}
+        async with http.get(f"{DISCORD_API}/users/@me", headers=headers) as resp:
+            user = await resp.json()
+        async with http.get(f"{DISCORD_API}/users/@me/guilds", headers=headers) as resp:
+            guilds = await resp.json()
 
-        # Fetch user info
-        user_resp = await http.get(
-            f"{DISCORD_API}/users/@me",
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-        user = await user_resp.json()
-
-        # Fetch guilds
-        guilds_resp = await http.get(
-            f"{DISCORD_API}/users/@me/guilds",
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-        guilds = await guilds_resp.json()
-
+    session.clear()
+    session.permanent = True
     session["user"] = {
         "id": user["id"],
         "username": user.get("global_name") or user["username"],
         "avatar": user.get("avatar"),
-        "discriminator": user.get("discriminator", "0"),
     }
-    # Store only guild IDs to keep the cookie small (4KB limit)
+    # Only IDs, to keep the cookie small. The access token isn't needed after this, so it isn't kept.
     session["guild_ids"] = [g["id"] for g in guilds]
-    session["access_token"] = access_token
-
     return redirect("/")
 
 
 @auth_bp.route("/logout")
 async def logout():
     session.clear()
-    return redirect("/login")
+    return redirect("/")

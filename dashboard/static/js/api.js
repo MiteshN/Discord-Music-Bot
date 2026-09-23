@@ -1,103 +1,50 @@
 /**
- * API wrapper for dashboard REST endpoints.
+ * Thin wrapper around the dashboard REST API. Errors are surfaced as toasts.
  */
 const API = {
     async request(method, path, body) {
-        const opts = {
-            method,
-            credentials: "same-origin",
-            headers: {},
-        };
+        const opts = { method, credentials: "same-origin", headers: {} };
         if (body !== undefined) {
             opts.headers["Content-Type"] = "application/json";
             opts.body = JSON.stringify(body);
         }
-        const resp = await fetch(path, opts);
-        if (resp.status === 401) {
-            window.location.href = "/login";
+        let resp;
+        try {
+            resp = await fetch(path, opts);
+        } catch {
+            App.toast("Can't reach the dashboard. Is the bot running?", "error");
             return null;
         }
-        const data = await resp.json();
-        if (data.error) {
-            App.toast(data.error, "error");
+        if (resp.status === 401) {
+            window.location.href = "/";
+            return null;
+        }
+        let data = null;
+        try { data = await resp.json(); } catch { /* empty body */ }
+        if (!resp.ok || (data && data.error)) {
+            App.toast((data && data.error) || `Request failed (${resp.status})`, "error");
             return null;
         }
         return data;
     },
 
-    getMe() {
-        return this.request("GET", "/api/@me");
+    me() { return this.request("GET", "/api/@me"); },
+    guilds() { return this.request("GET", "/api/guilds"); },
+
+    /** POST an action for the selected guild, e.g. API.action("player/skip"). */
+    action(path, body) {
+        if (!App.guildId) return Promise.resolve(null);
+        return this.request("POST", `/api/guild/${App.guildId}/${path}`, body);
     },
 
-    getGuilds() {
-        return this.request("GET", "/api/guilds");
+    removeFromQueue(index) {
+        return this.request("DELETE", `/api/guild/${App.guildId}/queue/${index}`);
     },
 
-    getPlayer(guildId) {
-        return this.request("GET", `/api/guild/${guildId}/player`);
-    },
-
-    getQueue(guildId) {
-        return this.request("GET", `/api/guild/${guildId}/queue`);
-    },
-
-    getSettings(guildId) {
-        return this.request("GET", `/api/guild/${guildId}/settings`);
-    },
-
-    pauseResume(guildId) {
-        return this.request("POST", `/api/guild/${guildId}/player/pause`);
-    },
-
-    skip(guildId) {
-        return this.request("POST", `/api/guild/${guildId}/player/skip`);
-    },
-
-    stop(guildId) {
-        return this.request("POST", `/api/guild/${guildId}/player/stop`);
-    },
-
-    seek(guildId, position) {
-        return this.request("POST", `/api/guild/${guildId}/player/seek`, { position });
-    },
-
-    setVolume(guildId, volume) {
-        return this.request("POST", `/api/guild/${guildId}/player/volume`, { volume });
-    },
-
-    setLoop(guildId, mode) {
-        return this.request("POST", `/api/guild/${guildId}/player/loop`, { mode });
-    },
-
-    setFilter(guildId, filter) {
-        return this.request("POST", `/api/guild/${guildId}/player/filter`, { filter });
-    },
-
-    addToQueue(guildId, query, title, thumbnail, duration) {
-        return this.request("POST", `/api/guild/${guildId}/queue/add`, { query, title, thumbnail, duration });
-    },
-
-    addToQueueTop(guildId, query, title, thumbnail, duration) {
-        return this.request("POST", `/api/guild/${guildId}/queue/add-top`, { query, title, thumbnail, duration });
-    },
-
-    moveInQueue(guildId, from, to) {
-        return this.request("POST", `/api/guild/${guildId}/queue/move`, { from, to });
-    },
-
-    shuffleQueue(guildId) {
-        return this.request("POST", `/api/guild/${guildId}/queue/shuffle`);
-    },
-
-    removeFromQueue(guildId, index) {
-        return this.request("DELETE", `/api/guild/${guildId}/queue/${index}`);
-    },
-
-    search(guildId, query) {
-        return this.request("GET", `/api/guild/${guildId}/search?q=${encodeURIComponent(query)}`);
-    },
-
-    updateSettings(guildId, settings) {
-        return this.request("POST", `/api/guild/${guildId}/settings`, settings);
+    async search(query, signal) {
+        const resp = await fetch(`/api/guild/${App.guildId}/search?q=${encodeURIComponent(query)}`,
+            { credentials: "same-origin", signal });
+        if (!resp.ok) return [];
+        return resp.json();
     },
 };

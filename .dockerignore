@@ -3,7 +3,9 @@ venv
 __pycache__
 .env
 .git
+.github
 .cache
 *.pyc
 cache
 *.db
+*.md

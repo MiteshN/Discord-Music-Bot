@@ -1,93 +1,64 @@
 /**
- * WebSocket client with auto-reconnect and event dispatch.
+ * WebSocket client: receives full player state and position updates, reconnects with backoff.
  */
 const WS = {
     socket: null,
     guildId: null,
-    reconnectTimer: null,
-    reconnectDelay: 1000,
+    retryTimer: null,
+    retryDelay: 1000,
 
     connect(guildId) {
         this.disconnect();
         this.guildId = guildId;
-
         const proto = location.protocol === "https:" ? "wss:" : "ws:";
-        const url = `${proto}//${location.host}/ws/${guildId}`;
-        this.socket = new WebSocket(url);
+        const socket = new WebSocket(`${proto}//${location.host}/ws/${guildId}`);
+        this.socket = socket;
 
-        this.socket.onopen = () => {
-            this.reconnectDelay = 1000;
-            document.getElementById("ws-status").classList.add("connected");
-            document.getElementById("ws-status").title = "Connected";
+        socket.onopen = () => {
+            this.retryDelay = 1000;
+            this._setStatus(true);
         };
-
-        this.socket.onmessage = (event) => {
+        socket.onmessage = (event) => {
             const msg = JSON.parse(event.data);
-            this._dispatch(msg);
+            if (msg.type === "state") App.onState(msg.data);
+            else if (msg.type === "position") Player.syncPosition(msg.data);
         };
-
-        this.socket.onclose = () => {
-            document.getElementById("ws-status").classList.remove("connected");
-            document.getElementById("ws-status").title = "Disconnected";
+        socket.onclose = (event) => {
+            this._setStatus(false);
+            if (event.code === 4001) { window.location.href = "/"; return; }
+            if (event.code === 4003) { App.toast("You don't have access to that server", "error"); return; }
             this._scheduleReconnect();
         };
-
-        this.socket.onerror = () => {
-            this.socket.close();
-        };
+        socket.onerror = () => socket.close();
     },
 
     disconnect() {
-        if (this.reconnectTimer) {
-            clearTimeout(this.reconnectTimer);
-            this.reconnectTimer = null;
-        }
+        clearTimeout(this.retryTimer);
+        this.retryTimer = null;
         if (this.socket) {
             this.socket.onclose = null;
             this.socket.close();
             this.socket = null;
         }
-        document.getElementById("ws-status").classList.remove("connected");
+        this._setStatus(false);
     },
 
     _scheduleReconnect() {
         if (!this.guildId) return;
-        this.reconnectTimer = setTimeout(() => {
-            this.connect(this.guildId);
-        }, this.reconnectDelay);
-        this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000);
+        this.retryTimer = setTimeout(() => this.connect(this.guildId), this.retryDelay);
+        this.retryDelay = Math.min(this.retryDelay * 2, 15000);
     },
 
-    _dispatch(msg) {
-        switch (msg.type) {
-            case "full_state":
-                Player.updateFull(msg.data);
-                Queue.update(msg.data.queue);
-                break;
-            case "player_update":
-                Player.updateFull(msg.data);
-                break;
-            case "heartbeat":
-                Player.updatePosition(msg.data);
-                break;
-            case "volume_update":
-                Player.updateVolume(msg.data.volume);
-                break;
-            case "loop_update":
-                Player.updateLoop(msg.data.loop);
-                break;
-            case "queue_update":
-                if (msg.data && msg.data.queue) {
-                    Queue.update(msg.data.queue);
-                } else {
-                    // Refetch queue
-                    API.getQueue(this.guildId).then(q => { if (q) Queue.update(q); });
-                }
-                break;
-            case "disconnected":
-                Player.showIdle();
-                Queue.update([]);
-                break;
-        }
+    _setStatus(live) {
+        const el = document.getElementById("ws-status");
+        el.classList.toggle("live", live);
+        el.title = live ? "Live" : "Reconnecting…";
     },
 };
+
+// Reconnect straight away when a backgrounded tab (e.g. on a phone) becomes visible again
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && WS.guildId && (!WS.socket || WS.socket.readyState > 1)) {
+        WS.connect(WS.guildId);
+    }
+});

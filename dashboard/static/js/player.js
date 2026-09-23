@@ -1,271 +1,229 @@
 /**
- * Player UI: bottom controller bar, seek bar interpolation, state display.
+ * Now-playing card: artwork, track info, progress, transport controls, volume and effects.
  */
 const Player = {
-    state: {
-        current: null,
-        elapsed: 0,
-        paused: false,
-        playing: false,
-        volume: 50,
-        loop: "off",
-        filter: "",
-        timestamp: 0,
-        in_voice: false,
-    },
-    seekInterval: null,
-    isSeeking: false,
+    state: null,
+    // Position is interpolated locally from the last sync, using the browser's own clock
+    pos: { elapsed: 0, rate: 1, paused: true, at: 0 },
+    seeking: false,
+    lastVolume: 100,
+    artUrl: "",
 
     init() {
-        // Play/Pause
-        document.getElementById("btn-play-pause").addEventListener("click", () => {
-            if (App.guildId) API.pauseResume(App.guildId);
+        this.el = {
+            card: document.getElementById("player"),
+            artwork: document.getElementById("artwork"),
+            artworkImg: document.getElementById("artwork-img"),
+            ambient: document.getElementById("ambient-img"),
+            status: document.getElementById("track-status"),
+            title: document.getElementById("track-title"),
+            meta: document.getElementById("track-meta"),
+            badges: document.getElementById("track-badges"),
+            seek: document.getElementById("seek"),
+            elapsed: document.getElementById("time-elapsed"),
+            total: document.getElementById("time-total"),
+            play: document.getElementById("btn-play"),
+            playIcon: document.getElementById("play-icon"),
+            prev: document.getElementById("btn-prev"),
+            skip: document.getElementById("btn-skip"),
+            stop: document.getElementById("btn-stop"),
+            loop: document.getElementById("btn-loop"),
+            volume: document.getElementById("volume"),
+            volumeValue: document.getElementById("volume-value"),
+            volumeIcon: document.getElementById("volume-icon"),
+            mute: document.getElementById("btn-mute"),
+            tfs: document.getElementById("setting-247"),
+            chips: document.querySelectorAll("#effects .chip"),
+        };
+        const el = this.el;
+
+        this._bind(el.play, () => API.action("player/pause"));
+        this._bind(el.skip, () => API.action("player/skip"));
+        this._bind(el.prev, () => API.action("player/previous"));
+        this._bind(el.stop, () => API.action("player/stop"));
+        this._bind(el.loop, () => {
+            const next = { off: "track", track: "queue", queue: "off" }[this.state?.loop || "off"];
+            return API.action("player/loop", { mode: next });
         });
 
-        // Skip
-        document.getElementById("btn-skip").addEventListener("click", () => {
-            if (App.guildId) API.skip(App.guildId);
+        // Seek: preview while dragging, send once on release
+        el.seek.addEventListener("pointerdown", () => { this.seeking = true; });
+        el.seek.addEventListener("input", () => {
+            this.seeking = true;
+            el.elapsed.textContent = fmt(+el.seek.value);
+            setPct(el.seek);
+        });
+        el.seek.addEventListener("change", async () => {
+            const target = +el.seek.value;
+            this.pos = { ...this.pos, elapsed: target, at: performance.now() };
+            await API.action("player/seek", { position: target });
+            this.seeking = false;
         });
 
-        // Stop
-        document.getElementById("btn-stop").addEventListener("click", () => {
-            if (App.guildId) API.stop(App.guildId);
+        // Volume: preview while dragging, send once on release (each change restarts FFmpeg)
+        el.volume.addEventListener("input", () => this._showVolume(+el.volume.value));
+        el.volume.addEventListener("change", () => this._sendVolume(+el.volume.value));
+        el.mute.addEventListener("click", () => {
+            const vol = +el.volume.value > 0 ? 0 : (this.lastVolume || 100);
+            this._showVolume(vol);
+            this._sendVolume(vol);
         });
 
-        // Shuffle (control row)
-        document.getElementById("btn-shuffle").addEventListener("click", () => {
-            if (App.guildId) API.shuffleQueue(App.guildId);
-        });
+        el.tfs.addEventListener("change", () => API.action("settings", { twenty_four_seven: el.tfs.checked }));
 
-        // Volume — update label/icon while dragging, send API only on release
-        const volSlider = document.getElementById("volume-slider");
-        volSlider.addEventListener("input", () => {
-            const val = parseInt(volSlider.value);
-            document.getElementById("volume-label").textContent = val + "%";
-            this._updateVolumeIcon(val);
-            this._updateRangeFill(volSlider);
-        });
-        volSlider.addEventListener("change", () => {
-            if (App.guildId) API.setVolume(App.guildId, parseInt(volSlider.value));
-        });
+        el.chips.forEach(chip => this._bind(chip, () => API.action("player/filter", { filter: chip.dataset.filter })));
 
-        // Loop
-        document.getElementById("loop-select").addEventListener("change", (e) => {
-            if (App.guildId) API.setLoop(App.guildId, e.target.value);
-        });
-
-        // Filter
-        document.getElementById("filter-select").addEventListener("change", (e) => {
-            if (App.guildId) API.setFilter(App.guildId, e.target.value);
-        });
-
-        // Seek bar
-        const seekBar = document.getElementById("seek-bar");
-        seekBar.addEventListener("mousedown", () => { this.isSeeking = true; });
-        seekBar.addEventListener("touchstart", () => { this.isSeeking = true; });
-        seekBar.addEventListener("change", () => {
-            this.isSeeking = false;
-            if (App.guildId && this.state.current) {
-                API.seek(App.guildId, parseInt(seekBar.value));
+        el.artworkImg.addEventListener("load", () => el.artwork.classList.add("has-art"));
+        el.artworkImg.addEventListener("error", () => {
+            const fallback = ytThumb(this.state?.current?.url, "hqdefault");
+            if (fallback && !el.artworkImg.src.endsWith(fallback)) {
+                el.artworkImg.src = fallback;
+                el.ambient.src = fallback;
+            } else {
+                el.artwork.classList.remove("has-art");
             }
         });
-        seekBar.addEventListener("input", () => {
-            document.getElementById("elapsed-time").textContent =
-                this._formatTime(parseInt(seekBar.value));
-            this._updateRangeFill(seekBar);
-        });
+        el.ambient.addEventListener("load", () => el.ambient.classList.add("visible"));
 
-        // Start interpolation
-        this.seekInterval = setInterval(() => this._interpolate(), 500);
+        setInterval(() => this._tick(), 250);
     },
 
-    updateFull(data) {
-        this.state = { ...this.state, ...data };
-
-        if (!data.current) {
-            this.showIdle();
-            return;
-        }
-
-        this.showActive();
-
-        // Hero area: title / artwork
-        const titleLink = document.getElementById("player-title-link");
-        titleLink.textContent = data.current.title;
-        titleLink.href = data.current.url || "#";
-
-        document.getElementById("player-requester").textContent =
-            `Requested by ${data.current.requester}`;
-
-        const artwork = document.getElementById("player-artwork");
-        if (data.current.thumbnail) {
-            artwork.src = data.current.thumbnail;
-            artwork.style.display = "block";
-        } else {
-            artwork.style.display = "none";
-        }
-
-        // Filter badge in hero
-        const filterBadge = document.getElementById("player-filter");
-        if (data.filter) {
-            filterBadge.textContent = data.filter;
-            filterBadge.style.display = "inline-block";
-        } else {
-            filterBadge.style.display = "none";
-        }
-
-        // Bottom controller: track info
-        const ctrlArtwork = document.getElementById("ctrl-artwork");
-        if (data.current.thumbnail) {
-            ctrlArtwork.src = data.current.thumbnail;
-            ctrlArtwork.style.display = "block";
-        } else {
-            ctrlArtwork.style.display = "none";
-        }
-        document.getElementById("ctrl-title").textContent = data.current.title;
-        document.getElementById("ctrl-requester").textContent = data.current.requester;
-
-        // Seek bar
-        const seekBar = document.getElementById("seek-bar");
-        const duration = data.current.duration || 0;
-        seekBar.max = duration;
-        if (!this.isSeeking) {
-            seekBar.value = Math.floor(data.elapsed || 0);
-            document.getElementById("elapsed-time").textContent =
-                this._formatTime(Math.floor(data.elapsed || 0));
-            this._updateRangeFill(seekBar);
-        }
-        document.getElementById("total-time").textContent = this._formatTime(duration);
-
-        // Play/pause icon
-        document.getElementById("play-pause-icon").textContent =
-            data.paused ? "play_arrow" : "pause";
-
-        // Volume
-        const volSlider = document.getElementById("volume-slider");
-        if (!volSlider.matches(":active")) {
-            volSlider.value = data.volume;
-            document.getElementById("volume-label").textContent = data.volume + "%";
-            this._updateVolumeIcon(data.volume);
-            this._updateRangeFill(volSlider);
-        }
-
-        // Loop
-        document.getElementById("loop-select").value = data.loop || "off";
-
-        // Filter select
-        const filterMap = {
-            "": "clear", "Nightcore": "nightcore", "Vaporwave": "vaporwave",
-            "Bass Boost": "bassboost", "Tremolo": "tremolo", "Vibrato": "vibrato", "8D": "8d",
-        };
-        document.getElementById("filter-select").value = filterMap[data.filter] || "clear";
-
-        // Update queue now playing
-        Queue.updateNowPlaying(data.current);
-    },
-
-    updatePosition(data) {
-        this.state.elapsed = data.elapsed;
-        this.state.paused = data.paused;
-        this.state.playing = data.playing;
-        this.state.timestamp = data.timestamp;
-
-        // Update play/pause icon
-        document.getElementById("play-pause-icon").textContent =
-            data.paused ? "play_arrow" : "pause";
-    },
-
-    updateVolume(vol) {
-        this.state.volume = vol;
-        const volSlider = document.getElementById("volume-slider");
-        if (!volSlider.matches(":active")) {
-            volSlider.value = vol;
-            document.getElementById("volume-label").textContent = vol + "%";
-            this._updateVolumeIcon(vol);
-            this._updateRangeFill(volSlider);
-        }
-    },
-
-    updateLoop(mode) {
-        this.state.loop = mode;
-        document.getElementById("loop-select").value = mode;
-    },
-
-    showIdle() {
-        document.getElementById("player-idle").style.display = "flex";
-        document.getElementById("player-active").style.display = "none";
-
-        // Clear controller
-        document.getElementById("ctrl-artwork").style.display = "none";
-        document.getElementById("ctrl-title").textContent = "";
-        document.getElementById("ctrl-requester").textContent = "";
-        document.getElementById("play-pause-icon").textContent = "play_arrow";
-
-        // Disable playback controls
-        ["btn-play-pause", "btn-skip", "btn-stop", "btn-prev"].forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.disabled = true;
-        });
-
-        const seekBar = document.getElementById("seek-bar");
-        seekBar.value = 0;
-        seekBar.max = 100;
-        seekBar.disabled = true;
-        this._updateRangeFill(seekBar);
-        document.getElementById("elapsed-time").textContent = "0:00";
-        document.getElementById("total-time").textContent = "0:00";
-
-        // Clear queue now playing
-        Queue.updateNowPlaying(null);
-    },
-
-    showActive() {
-        document.getElementById("player-idle").style.display = "none";
-        document.getElementById("player-active").style.display = "flex";
-        document.getElementById("seek-bar").disabled = false;
-
-        // Re-enable playback controls
-        ["btn-play-pause", "btn-skip", "btn-stop", "btn-prev"].forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.disabled = false;
+    /** Run an async action with a busy indicator on the button. */
+    _bind(button, action) {
+        button.addEventListener("click", async () => {
+            if (button.disabled || button.classList.contains("busy")) return;
+            button.classList.add("busy");
+            try { await action(); } finally { button.classList.remove("busy"); }
         });
     },
 
-    _interpolate() {
-        if (!this.state.current || this.state.paused || this.isSeeking) return;
-        const now = Date.now() / 1000;
-        const elapsed = this.state.elapsed + (now - this.state.timestamp);
-        const duration = this.state.current.duration || 0;
-        const clamped = duration > 0 ? Math.min(elapsed, duration) : elapsed;
+    render(s) {
+        this.state = s;
+        const el = this.el;
+        const cur = s.current;
+        const active = !!cur && s.in_voice;
 
-        const seekBar = document.getElementById("seek-bar");
-        seekBar.value = Math.floor(clamped);
-        document.getElementById("elapsed-time").textContent =
-            this._formatTime(Math.floor(clamped));
-        this._updateRangeFill(seekBar);
+        el.card.classList.toggle("is-playing", active && !s.paused);
+        el.card.classList.toggle("is-paused", active && s.paused);
+
+        // Artwork + ambient background
+        const art = cur?.thumbnail || "";
+        if (art !== this.artUrl) {
+            this.artUrl = art;
+            el.artwork.classList.remove("has-art");
+            el.ambient.classList.remove("visible");
+            if (art) {
+                el.artworkImg.src = art;
+                el.ambient.src = art;
+            } else {
+                el.artworkImg.removeAttribute("src");
+                el.ambient.removeAttribute("src");
+            }
+        }
+
+        // Track text
+        if (cur) {
+            el.status.textContent = s.paused ? "Paused" : "Now playing";
+            el.title.textContent = cur.title;
+            if (/^https?:\/\//.test(cur.url)) el.title.href = cur.url; else el.title.removeAttribute("href");
+            el.meta.textContent = `Requested by ${cur.requester}`;
+        } else {
+            el.status.textContent = s.in_voice ? "Ready" : "Not connected";
+            el.title.textContent = "Queue something up";
+            el.title.removeAttribute("href");
+            el.meta.innerHTML = s.in_voice
+                ? "Search above, or use <code>/play</code> in Discord."
+                : "Join a voice channel in this server, then search above or use <code>/play</code>.";
+        }
+
+        el.badges.replaceChildren(...[
+            s.filter && badge("graphic_eq", s.filter, true),
+            s.loop !== "off" && badge(s.loop === "track" ? "repeat_one" : "repeat", s.loop === "track" ? "Looping track" : "Looping queue"),
+            s.twenty_four_seven && badge("schedule", "24/7"),
+            cur && cur.duration === 0 && badge("sensors", "Live"),
+        ].filter(Boolean));
+
+        // Progress
+        const duration = cur?.duration || 0;
+        el.seek.max = duration || 100;
+        el.seek.disabled = !active || !duration;
+        el.total.textContent = duration ? fmt(duration) : (cur ? "Live" : "0:00");
+        this.syncPosition(s);
+
+        // Controls
+        el.playIcon.textContent = active && !s.paused ? "pause" : "play_arrow";
+        el.play.disabled = !active;
+        el.skip.disabled = !active;
+        el.stop.disabled = !s.in_voice;
+        el.prev.disabled = !s.in_voice || !s.has_previous;
+        el.loop.classList.toggle("on", s.loop !== "off");
+        el.loop.querySelector(".icon").textContent = s.loop === "track" ? "repeat_one" : "repeat";
+        el.loop.title = `Loop (${s.loop})`;
+
+        if (!el.volume.matches(":active")) this._showVolume(s.volume);
+        el.tfs.checked = !!s.twenty_four_seven;
+
+        el.chips.forEach(chip => {
+            chip.classList.toggle("active", chip.dataset.filter === (s.filter_key || ""));
+            chip.disabled = !active;
+        });
     },
 
-    _formatTime(seconds) {
-        if (seconds <= 0) return "0:00";
-        const s = seconds % 60;
-        const m = Math.floor(seconds / 60) % 60;
-        const h = Math.floor(seconds / 3600);
-        if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-        return `${m}:${String(s).padStart(2, "0")}`;
+    syncPosition(p) {
+        this.pos = { elapsed: p.elapsed || 0, rate: p.rate || 1, paused: !!p.paused, at: performance.now() };
+        this._tick();
     },
 
-    _updateRangeFill(input) {
-        const min = parseFloat(input.min) || 0;
-        const max = parseFloat(input.max) || 100;
-        const val = parseFloat(input.value) || 0;
-        const pct = max > min ? ((val - min) / (max - min)) * 100 : 0;
-        input.style.background = `linear-gradient(to right, var(--text-primary) 0%, var(--text-primary) ${pct}%, var(--bg-lighter) ${pct}%, var(--bg-lighter) 100%)`;
+    _tick() {
+        const cur = this.state?.current;
+        if (!cur || this.seeking) return;
+        let t = this.pos.elapsed;
+        if (!this.pos.paused && this.state.in_voice) t += (performance.now() - this.pos.at) / 1000 * this.pos.rate;
+        if (cur.duration) t = Math.min(t, cur.duration);
+        this.el.seek.value = Math.floor(t);
+        this.el.elapsed.textContent = fmt(t);
+        setPct(this.el.seek);
     },
 
-    _updateVolumeIcon(vol) {
-        const icon = document.getElementById("volume-icon");
-        if (vol === 0) icon.textContent = "volume_off";
-        else if (vol < 40) icon.textContent = "volume_down";
-        else icon.textContent = "volume_up";
+    _showVolume(vol) {
+        const el = this.el;
+        el.volume.value = vol;
+        el.volumeValue.textContent = `${vol}%`;
+        el.volumeIcon.textContent = vol === 0 ? "volume_off" : vol < 50 ? "volume_down" : "volume_up";
+        if (vol > 0) this.lastVolume = vol;
+        setPct(el.volume);
+    },
+
+    _sendVolume(vol) {
+        API.action("player/volume", { volume: vol });
+    },
+
+    reset() {
+        this.state = null;
+        this.artUrl = "";
+        this.el.ambient.classList.remove("visible");
     },
 };
+
+function fmt(seconds) {
+    seconds = Math.max(0, Math.floor(seconds || 0));
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor(seconds / 60) % 60;
+    const s = String(seconds % 60).padStart(2, "0");
+    return h ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
+}
+
+function setPct(input) {
+    const max = +input.max || 100;
+    input.style.setProperty("--pct", `${Math.min(100, (+input.value / max) * 100)}%`);
+}
+
+function badge(icon, text, accent = false) {
+    const el = document.createElement("span");
+    el.className = accent ? "badge accent" : "badge";
+    const i = document.createElement("span");
+    i.className = "icon";
+    i.textContent = icon;
+    el.append(i, text);
+    return el;
+}
