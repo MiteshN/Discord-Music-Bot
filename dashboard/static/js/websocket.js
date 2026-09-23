@@ -36,6 +36,8 @@ const WS = {
         clearTimeout(this.retryTimer);
         this.retryTimer = null;
         if (this.socket) {
+            // Detach handlers first so a message still in flight from the old server can't repaint the page
+            this.socket.onmessage = null;
             this.socket.onclose = null;
             this.socket.close();
             this.socket = null;

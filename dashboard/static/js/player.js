@@ -176,7 +176,13 @@ const Player = {
 
     _tick() {
         const cur = this.state?.current;
-        if (!cur || this.seeking) return;
+        if (this.seeking) return;
+        if (!cur) {
+            this.el.seek.value = 0;
+            this.el.elapsed.textContent = "0:00";
+            setPct(this.el.seek);
+            return;
+        }
         let t = this.pos.elapsed;
         if (!this.pos.paused && this.state.in_voice) t += (performance.now() - this.pos.at) / 1000 * this.pos.rate;
         if (cur.duration) t = Math.min(t, cur.duration);
@@ -198,10 +204,17 @@ const Player = {
         API.action("player/volume", { volume: vol });
     },
 
+    /** Clear everything from the previous server straight away, before the new server's state arrives. */
     reset() {
+        const el = this.el;
         this.state = null;
         this.artUrl = "";
-        this.el.ambient.classList.remove("visible");
+        el.artwork.classList.remove("has-art");
+        el.artworkImg.removeAttribute("src");
+        el.ambient.classList.remove("visible");
+        el.ambient.removeAttribute("src");
+        el.seek.max = 100;
+        this._tick();
     },
 };
 
