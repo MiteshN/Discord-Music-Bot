@@ -952,11 +952,24 @@ class Music(commands.Cog):
     async def play_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
         if len(current) < 2 or URL_RE.match(current):
             return []
-        yt, sp = await asyncio.gather(self._youtube_suggestions(current), self._spotify_suggestions(current),
-                                      return_exceptions=True)
-        sp = sp if isinstance(sp, list) else []
+        yt_task = asyncio.create_task(self._youtube_suggestions(current))
+        sp_task = asyncio.create_task(self._spotify_suggestions(current))
+        # Discord gives up after 3s: answer with whichever sources made it in time
+        done, pending = await asyncio.wait({yt_task, sp_task}, timeout=2)
+        for task in pending:
+            task.cancel()
+
+        def result(task):
+            if task not in done:
+                return []
+            if task.exception():
+                log.debug("Autocomplete source failed: %r", task.exception())
+                return []
+            return task.result()
+
+        sp = result(sp_task)
         choices = [app_commands.Choice(name=f"YouTube · {s}"[:100], value=s[:100])
-                   for s in (yt if isinstance(yt, list) else [])[: 10 - len(sp)]]
+                   for s in result(yt_task)[: 10 - len(sp)]]
         return (choices + sp)[:25]
 
     # --- Commands: playback ---

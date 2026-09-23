@@ -30,9 +30,13 @@ class LyricsFetcher:
         self.genius = None
         token = os.getenv("GENIUS_API_TOKEN")
         if token:
-            import lyricsgenius
+            # Optional fallback: a broken or changed lyricsgenius must never stop the bot from starting
+            try:
+                import lyricsgenius
 
-            self.genius = lyricsgenius.Genius(token, verbose=False, remove_section_headers=True, timeout=10, retries=1)
+                self.genius = lyricsgenius.Genius(token, remove_section_headers=True, timeout=10, retries=1)
+            except Exception as e:
+                log.warning("Genius lyrics disabled, couldn't initialise lyricsgenius: %s", e)
 
     async def fetch_lyrics(self, session: aiohttp.ClientSession, title: str) -> str | None:
         query = clean_title(title)
