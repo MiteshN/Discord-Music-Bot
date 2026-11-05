@@ -108,6 +108,31 @@ async def search(guild_id: int, user_id: int):
     return jsonify(await backend().search(guild_id, query[:200]))
 
 
+@api_bp.get("/guilds/<int:guild_id>/stats")
+@guild_route
+async def stats(guild_id: int, user_id: int):
+    return jsonify(await backend().stats(guild_id, request.args.get("period", "week")))
+
+
+@api_bp.get("/playlists")
+@signed_in
+async def playlists():
+    return jsonify(await backend().playlists(int(session["user"]["id"])))
+
+
+@api_bp.post("/playlists/actions/<action>")
+@signed_in
+async def playlist_action(action: str):
+    body = await request.get_json(silent=True)
+    try:
+        message = await backend().playlist_action(int(session["user"]["id"]), action, body if isinstance(body, dict) else {})
+    except PlayerError as e:
+        return error(plain(str(e)), 400)
+    except (KeyError, TypeError, ValueError):
+        return error("Invalid request", 400)
+    return jsonify({"message": message})
+
+
 @api_bp.get("/guilds/<int:guild_id>/lyrics")
 @guild_route
 async def lyrics(guild_id: int, user_id: int):

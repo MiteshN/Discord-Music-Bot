@@ -55,6 +55,9 @@ _OPTIONS = {
     "playlist": {**_BASE_OPTIONS, "noplaylist": False, "extract_flat": "in_playlist", "ignoreerrors": True},
     # Only the top hit: without this yt-dlp pages through every search result
     "music": {**_BASE_OPTIONS, "extract_flat": "in_playlist", "playlist_items": "1"},
+    # A video's auto-generated mix, for autoplay: the first couple dozen entries are plenty
+    "mix": {**_BASE_OPTIONS, "noplaylist": False, "extract_flat": "in_playlist", "ignoreerrors": True,
+            "playlist_items": "1:25"},
 }
 
 # Resolved stream URLs expire after ~6h; refresh well before that.
@@ -127,11 +130,13 @@ def _flat_entry(e: dict) -> dict | None:
     url = e.get("url") or e.get("webpage_url") or ""
     if not url and e.get("id"):
         url = f"https://www.youtube.com/watch?v={e['id']}"
+    artist = (e.get("channel") or e.get("uploader") or "").removesuffix(" - Topic").strip()
     return {
         "title": e["title"],
         "url": url,
         "duration": int(e.get("duration") or 0),
         "thumbnail": e.get("thumbnail") or youtube_thumbnail(e.get("id")),
+        "artist": artist,
         "is_video": e.get("ie_key") != "YoutubeTab" and bool(e.get("duration")),
     }
 
@@ -174,6 +179,13 @@ def _music_search(query: str) -> str | None:
         if e and e.get("url"):
             return e["url"]
     return None
+
+
+@_picklable_errors
+def _mix(video_id: str) -> list[dict]:
+    info = _ydl("mix").extract_info(f"https://www.youtube.com/watch?v={video_id}&list=RD{video_id}", download=False)
+    entries = [_flat_entry(e) for e in info.get("entries") or []]
+    return [e for e in entries if e and e["is_video"]]
 
 
 @_picklable_errors
@@ -250,6 +262,11 @@ async def music_search(query: str) -> str | None:
     except Exception as e:
         log.debug("YouTube Music search failed for %r: %s", query, e)
         return None
+
+
+async def related(video_id: str) -> list[dict]:
+    """Songs YouTube would play after this one (its mix), most related first."""
+    return await _run(_mix, video_id)
 
 
 async def extract_playlist(url: str) -> list[dict]:

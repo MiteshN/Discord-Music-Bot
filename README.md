@@ -14,7 +14,14 @@ A Discord music bot with a real-time web dashboard. Plays YouTube, Spotify, Soun
 - **Lyrics** from [LRCLIB](https://lrclib.net) (no key needed), time-synced in the dashboard. Genius is an optional fallback.
 - **Fair by default**: a **DJ** role (if you create one) guards destructive actions; everyone else votes to skip when 3+ people are listening.
 - **24/7 mode**, auto-leave when idle or alone, and the current song in the voice channel status.
-- **Web dashboard** (optional): sign in with Discord, control playback, drag to reorder the queue, search, follow synced lyrics, and see what everyone else is doing, live.
+- **Guess the song**: the bot plays clips and everyone in voice races to type the title (+2) or artist (+1). Pick a genre, a decade or a playlist; scores go on a server leaderboard.
+- **Saved playlists**: save the queue, add songs with one click, load them in any server, and share them with a code.
+- **Autoplay**: when the queue runs out, keep going with songs related to the last one.
+- **Picks up after restarts**: after an update or reboot, the bot rejoins and carries on from the same spot in the same song.
+- **Internet radio**: thousands of stations from radio-browser.info, by name, genre or country.
+- **Server stats**: top songs, requesters and artists, and listening time, for the week, month or all time.
+- **Queue cleanup**: remove ranges, duplicates, one person's songs, or songs from people who've left.
+- **Web dashboard** (optional): sign in with Discord, control playback, drag to reorder the queue, search (including radio), follow synced lyrics, manage playlists, browse stats, and see what everyone else is doing, live.
 
 ## Commands
 
@@ -37,17 +44,25 @@ Every command works as a slash command and with the `!` prefix.
 | `/volume [0-100]` | Show or set the volume. 100 gives the best quality |
 | `/loop [off/track/queue]` | Set the loop mode, or cycle it |
 | `/shuffle` · `/clear` | Shuffle or clear the queue |
-| `/remove <position>` · `/move <from> <to>` | Edit the queue |
+| `/remove <positions>` · `/move <from> <to>` | Edit the queue (`/remove 3`, `/remove 3-7`, `/remove 1 4 9`) |
+| `/removedupes` · `/removeuser [@member]` · `/removeabsent` | Remove duplicates, someone's songs, or songs from people who left |
+| `/autoplay [on/off]` | Keep playing related songs when the queue runs out |
+| `/playrecent [count]` | Queue the songs you requested most recently |
+| `/radio <name or genre> [--country=…]` | Play an internet radio station |
+| `/save` | Send the current song to your DMs (also the ❤️ button) |
 | `/lyrics` | Lyrics for the current song |
 | `/nightcore` `/vaporwave` `/bassboost` `/8d` `/tremolo` `/vibrato` | Effects |
 | `/speed <0.5-2.0>` · `/cleareffect` | Change speed, or remove effects |
+| `/playlist save/load/list/show/add/remove/delete/rename/share/copy` | Your saved playlists (they work in every server) |
+| `/guessthesong play [genre, decade or playlist link] [rounds] [seconds]` | Start guess the song (`!gts`). Also `stop` and `leaderboard` |
+| `/stats [week/month/all]` | This server's top songs, requesters, artists and listening time |
 | `/247` | Stay in the voice channel even when idle |
 | `/dashboard` · `/help` | Dashboard link, and the full command list |
 | `/cachestats` · `/clearcache` | Audio cache info, or empty it |
 
 Playback controls (skip, pause, seek, effects...) need you to be in the bot's voice channel.
 
-**DJ role:** if a role named `DJ` exists (change it with `DJ_ROLE_NAME`), only DJs and admins can stop, clear, shuffle, remove, move, skip to, change the volume, toggle 24/7 and clear the cache. Without that role, anyone can. DJs, admins and whoever requested the current song always skip instantly. These rules apply to the dashboard too.
+**DJ role:** if a role named `DJ` exists (change it with `DJ_ROLE_NAME`), only DJs and admins can stop, clear, shuffle, remove, move, skip to, clean up the queue, change the volume, toggle 24/7 and clear the cache (anyone can remove their own songs). Without that role, anyone can. DJs, admins and whoever requested the current song always skip instantly. These rules apply to the dashboard too.
 
 ## Running it
 
@@ -103,6 +118,10 @@ python -m mugetsu
 
 **Genius** (optional lyrics fallback): create a client at [genius.com/api-clients](https://genius.com/api-clients) and generate an access token.
 
+## Guess the song
+
+`/guessthesong play` takes a genre and/or decade (`rock`, `80s`, `pop 2018`, `1990-1999`), a Spotify or YouTube playlist link, or nothing (recent hits). Genre and decade games search Spotify, so they need Spotify credentials; playlist links work without them, though Spotify playlists give the cleanest answers. Guesses are forgiving about typos, capitalisation and extras like "(Remastered)". Only people in the bot's voice channel can score, and while a game is on, the queue, now-playing and lyrics stay hidden so nobody can peek. Music has to be stopped before a game starts.
+
 ## Web dashboard
 
 1. In the Developer Portal, open your application's **OAuth2** page and copy the **Client ID** and **Client Secret**.
@@ -130,6 +149,7 @@ Adding a song from the dashboard makes the bot join your voice channel if you're
 | `CACHE_LIMIT_MB` | `2048` | Cache size; `0` turns caching off |
 | `MAX_CACHE_DURATION` | `1800` | Longest track (seconds) worth caching |
 | `IDLE_TIMEOUT` / `ALONE_TIMEOUT` | `600` / `180` | Seconds before leaving when idle / alone |
+| `RESUME_WINDOW` | `900` | After a restart, pick up sessions saved within this many seconds. `0` turns it off |
 | `LOG_LEVEL` | `INFO` | `DEBUG` for more detail |
 | `YOUTUBE_PLAYER_CLIENTS` | `default,-tv,…` | YouTube clients yt-dlp may use. The TV clients are left out because FFmpeg gets HTTP 403 on their stream URLs |
 

@@ -13,7 +13,7 @@ interface Item {
   title: string;
   meta: string;
   thumb: string;
-  source: "spotify" | "youtube";
+  source: "spotify" | "youtube" | "radio";
   label: string;
   wide?: boolean;
 }
@@ -48,8 +48,18 @@ function flatten(data: SearchResults | null): [string, Item[]][] {
     label: v.title,
     wide: true,
   }));
+  const stations: Item[] = (data.stations ?? []).map((st) => ({
+    key: `r${st.uuid}`,
+    query: `radio:${st.uuid}`,
+    title: st.name,
+    meta: st.summary,
+    thumb: st.favicon,
+    source: "radio",
+    label: `${st.name} radio`,
+  }));
   return (
     [
+      ["Radio stations", stations],
       ["Songs", songs],
       ["Albums", albums],
       ["Videos", videos],
@@ -188,7 +198,7 @@ export function SearchBox({ autoFocus = false, onDone }: { autoFocus?: boolean; 
           onKeyDown={onKeyDown}
           autoFocus={autoFocus}
           disabled={!guildId}
-          placeholder={guildId ? "Search songs, albums, or paste a link" : "Pick a server first"}
+          placeholder={guildId ? "Search songs, albums, radio, or paste a link" : "Pick a server first"}
           autoComplete="off"
           spellCheck={false}
           enterKeyHint="search"
@@ -233,7 +243,7 @@ export function SearchBox({ autoFocus = false, onDone }: { autoFocus?: boolean; 
               <kbd className="text-xs text-ink-3">Enter</kbd>
             </button>
           ) : term.length < 2 ? (
-            <p className="px-3 py-4 text-sm text-ink-3">Keep typing…</p>
+            <p className="px-3 py-4 text-sm text-ink-3">Keep typing… (tip: start with “radio” to find stations)</p>
           ) : noResults ? (
             <div className="px-3 py-4 text-sm text-ink-3">
               No matches. Press <kbd className="text-ink-2">Enter</kbd> to search YouTube for “{term}”.

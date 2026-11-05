@@ -47,7 +47,9 @@ class GuildPlayer:
         self.q = GuildQueue()
         self.volume = saved.volume
         self.twenty_four_seven = saved.twenty_four_seven
+        self.autoplay = saved.autoplay
         self.text_channel_id: int | None = None
+        self.game = None  # a running guess-the-song game takes over playback
 
         self.lock = asyncio.Lock()
         self.play_id = 0  # bumped on every play/stop so stale "track ended" callbacks are ignored
@@ -56,6 +58,7 @@ class GuildPlayer:
         self.alone_since: float | None = None
         self.closed = False
         self._prefetch_task: asyncio.Task | None = None
+        self._logged: tuple[Song, asyncio.Task] | None = None  # the current song's row in the play log
 
     # --- Discord handles ---
 
@@ -84,7 +87,7 @@ class GuildPlayer:
         return [m for m in vc.channel.members if not m.bot]
 
     def notify(self):
-        self.manager.notify(self.guild_id)
+        self.manager.changed(self.guild_id)
 
     def _done(self, message: str, actor: discord.Member | None) -> str:
         """Tell dashboard viewers what happened, then hand the message back to the caller."""
@@ -103,6 +106,30 @@ class GuildPlayer:
         if not vc or not vc.is_connected():
             raise PlayerError("I'm not in a voice channel.")
         return vc
+
+    def _no_game(self):
+        if self.game is not None:
+            raise PlayerError("A guess-the-song game is running here. End it first with `/guessthesong stop`.")
+
+    def played_keys(self) -> set[str]:
+        """Songs already heard or coming up, so autoplay doesn't repeat them."""
+        songs = [*self.q.history, *self.q.queue, *([self.q.current] if self.q.current else [])]
+        return {s.key for s in songs}
+
+    # --- Play log (for stats and "play recent"); writes happen in the background ---
+
+    def _end_logged_play(self):
+        logged, self._logged = self._logged, None
+        if logged is None:
+            return
+        song, task = logged
+        seconds = self.q.position  # still the finished song's clock
+        if song.duration:
+            seconds = min(seconds, song.duration)
+        self.manager.background(self.manager.finish_play(task, seconds))
+
+    def _log_play(self, song: Song):
+        self._logged = (song, self.manager.background(self.manager.log_play(self.guild_id, song)))
 
     # --- Playback engine. Everything below runs with self.lock held. ---
 
@@ -128,8 +155,10 @@ class GuildPlayer:
             return False
 
         self.audio_input = inp
+        self._end_logged_play()
         self._play_source(vc, source)
         self.q.mark_playing(position)
+        self._log_play(song)
         self.idle_since = None
         log.info(
             "[Guild %d] Playing %s (%s, %s, %s)", self.guild_id, song.title, format_duration(song.duration),
@@ -166,6 +195,8 @@ class GuildPlayer:
         async with self.lock:
             if self.play_id != token or self.closed:
                 return  # superseded by a skip/seek/filter change
+            if self.game is not None:
+                return  # the game decides what plays next
             song = self.q.current
             # A track that dies within 2s never really played: don't loop it forever
             failed = song is not None and self.q.position < 2 and song.duration > 5
@@ -176,7 +207,7 @@ class GuildPlayer:
                 await self.manager.hooks.notice(
                     self, f"⚠️ Playback of **{esc(song.title)}** failed{reason}, skipping."
                 )
-            await self._play_from(self.q.advance(failed=failed))
+            await self._play_from(self.q.advance(failed=failed), natural_end=not failed)
 
     async def _ffmpeg_reason(self, stderr) -> str:
         """Why FFmpeg gave up, from its own output (e.g. an HTTP 403 from YouTube)."""
@@ -191,9 +222,10 @@ class GuildPlayer:
             log.warning("[Guild %d] FFmpeg output:\n%s", self.guild_id, text)
         return stderr.reason()
 
-    async def _play_from(self, song: Song | None, *, announce: bool = True) -> Song | None:
+    async def _play_from(self, song: Song | None, *, announce: bool = True, natural_end: bool = False,
+                         position: float = 0) -> Song | None:
         while song:
-            if await self._start_locked(song):
+            if await self._start_locked(song, position):
                 await self.manager.hooks.track_started(self, song, announce=announce)
                 self.schedule_prefetch()
                 self.notify()
@@ -201,7 +233,15 @@ class GuildPlayer:
                 return song
             if self.closed or not self.voice:
                 return None
+            position = 0
             song = self.q.advance(failed=True)
+
+        # The queue ran out on its own: with autoplay on, keep going with related songs
+        if natural_end and self.autoplay and self.game is None and not self.closed and self.voice and self.q.history:
+            more = await self.manager.recommend(self.q.history[-1], self.played_keys())
+            if more and not self.closed and self.q.current is None:
+                self.q.add(more)
+                return await self._play_from(self.q.advance(), announce=announce)
 
         self._mark_idle()
         await self.manager.hooks.track_cleared(self)
@@ -236,6 +276,7 @@ class GuildPlayer:
         self.notify()
 
     def _mark_idle(self):
+        self._end_logged_play()
         self.q.mark_idle()
         self.audio_input = None
         self.idle_since = time.monotonic()
@@ -274,6 +315,9 @@ class GuildPlayer:
         if self.closed:
             return
         self.closed = True
+        if self.game is not None:
+            self.game.abort()
+        self._end_logged_play()
         self.play_id += 1  # ignore the callback from stopping playback
         if self._prefetch_task:
             self._prefetch_task.cancel()
@@ -290,6 +334,7 @@ class GuildPlayer:
     async def enqueue(self, songs: list[Song], *, top: bool = False, channel_id: int | None = None,
                       announce: bool = True, actor: discord.Member | None = None) -> Song | None:
         """Add songs and start playback if idle. Returns the song that started playing, if any."""
+        self._no_game()
         if channel_id:
             self.text_channel_id = channel_id
         self.q.add(songs, top=top)
@@ -330,6 +375,7 @@ class GuildPlayer:
         return await self.toggle_pause(actor)
 
     async def skip(self, actor: discord.Member | None = None) -> str:
+        self._no_game()
         vc = self._playing_vc()
         # DJs, the song's requester, and small audiences skip instantly; everyone else votes
         if actor is not None and not self.manager.can_force_skip(actor, self):
@@ -352,6 +398,7 @@ class GuildPlayer:
         return self._done(message, actor)
 
     async def skip_to(self, index: int, actor: discord.Member | None = None) -> str:
+        self._no_game()
         self.manager.require_dj(actor)
         vc = self._connected_vc()
         async with self.lock:
@@ -369,6 +416,7 @@ class GuildPlayer:
         return self._done(f"⏭️ Jumped to **{esc(song.title)}**.", actor)
 
     async def previous(self, actor: discord.Member | None = None) -> str:
+        self._no_game()
         vc = self._connected_vc()
         async with self.lock:
             song = self.q.rewind()
@@ -387,6 +435,7 @@ class GuildPlayer:
         return message
 
     async def seek(self, seconds: float, actor: discord.Member | None = None) -> str:
+        self._no_game()
         self._playing_vc()
         song = self.q.current
         if not song or song.duration <= 0 or song.is_live:
@@ -406,7 +455,7 @@ class GuildPlayer:
             position = self.q.position
             self.volume = volume / 100
             await self._restart_locked(position)
-        await self.manager.settings.save(self.guild_id, volume=self.volume, twenty_four_seven=self.twenty_four_seven)
+        await self.manager.settings.save(self.guild_id, volume=self.volume)
         self.notify()
         return self._done(f"🔊 Volume set to **{volume}%**.", actor)
 
@@ -424,6 +473,7 @@ class GuildPlayer:
         return self._done(f"{icons[self.q.loop_mode]} Loop: **{self.q.loop_mode.value}**.", actor)
 
     async def set_filter(self, key: str, actor: discord.Member | None = None) -> str:
+        self._no_game()
         try:
             audio_filter = get_filter(key)
         except ValueError as e:
@@ -475,11 +525,109 @@ class GuildPlayer:
     async def set_247(self, enabled: bool, actor: discord.Member | None = None) -> str:
         self.manager.require_dj(actor)
         self.twenty_four_seven = enabled
-        await self.manager.settings.save(self.guild_id, volume=self.volume, twenty_four_seven=enabled)
+        await self.manager.settings.save(self.guild_id, twenty_four_seven=enabled)
         self.notify()
         if enabled:
             return self._done("🌙 24/7 mode **on**: I'll stay in voice.", actor)
         return self._done("24/7 mode **off**: I'll leave when idle.", actor)
+
+    async def remove_positions(self, indices: list[int], actor: discord.Member | None = None) -> str:
+        self.manager.require_dj(actor)
+        removed = self.q.remove_indices(indices)
+        if not removed:
+            raise PlayerError("There are no songs at those positions.")
+        return self._after_removal(removed, actor, refresh=0 in indices)
+
+    async def remove_duplicates(self, actor: discord.Member | None = None) -> str:
+        self.manager.require_dj(actor)
+        seen = {self.q.current.key} if self.q.current else set()
+
+        def duplicate(_i, song):
+            if song.key in seen:
+                return True
+            seen.add(song.key)
+            return False
+
+        removed = self.q.remove_where(duplicate)
+        if not removed:
+            raise PlayerError("There are no duplicates in the queue.")
+        return self._after_removal(removed, actor)
+
+    async def remove_requester(self, user_id: int, name: str, actor: discord.Member | None = None) -> str:
+        if actor is not None and actor.id != user_id:
+            self.manager.require_dj(actor)  # your own songs are always yours to remove
+        removed = self.q.remove_where(lambda _i, song: song.requester_id == user_id)
+        if not removed:
+            raise PlayerError(f"{name} has nothing in the queue.")
+        return self._after_removal(removed, actor)
+
+    async def remove_absent(self, actor: discord.Member | None = None) -> str:
+        self.manager.require_dj(actor)
+        here = {m.id for m in self.listeners()}
+        removed = self.q.remove_where(lambda _i, song: song.requester_id not in here and song.requester_id != 0)
+        if not removed:
+            raise PlayerError("Everyone with songs in the queue is still here.")
+        return self._after_removal(removed, actor)
+
+    def _after_removal(self, removed: list[Song], actor: discord.Member | None, *, refresh: bool = True) -> str:
+        if refresh:
+            self.schedule_prefetch()
+        self.notify()
+        what = f"**{esc(removed[0].title)}**" if len(removed) == 1 else f"**{len(removed)}** songs"
+        return self._done(f"🗑️ Removed {what}.", actor)
+
+    async def set_autoplay(self, enabled: bool, actor: discord.Member | None = None) -> str:
+        self.autoplay = enabled
+        await self.manager.settings.save(self.guild_id, autoplay=enabled)
+        self.notify()
+        if enabled and self.q.current is None and not self.q.queue and self.is_connected and self.game is None:
+            async with self.lock:  # nothing playing: start right away from the last song
+                if self.q.current is None and not self.q.queue:
+                    await self._play_from(None, natural_end=True)
+        if enabled:
+            return self._done("♾️ Autoplay **on**: I'll keep playing similar songs when the queue runs out.", actor)
+        return self._done("Autoplay **off**.", actor)
+
+    # --- Restarts and games ---
+
+    async def resume_session(self, song: Song | None, position: float, *, paused: bool) -> Song | None:
+        """Pick up after a restart: play `song` from `position`, or the queue if there's no song."""
+        async with self.lock:
+            if song is not None:
+                self.q.current = song
+            else:
+                song = self.q.advance()
+            started = await self._play_from(song, announce=False, position=position)
+            vc = self.voice
+            if started and paused and vc and vc.is_playing():
+                vc.pause()
+                self.q.mark_paused()
+            return started
+
+    async def play_clip(self, song: Song, start: float):
+        """Guess the song: play part of a song without touching the queue (the game times it)."""
+        async with self.lock:
+            vc = self._connected_vc()
+            inp = await self.manager.resolve_input(song, cache=False)
+            source = self.manager.make_source(
+                inp, volume=self.volume, audio_filter=None, position=start, bitrate=_bitrate(vc)
+            )
+            self.q.current = song
+            self._play_source(vc, source)
+            self.q.mark_playing(start)
+            self.idle_since = None
+            self.notify()
+
+    async def stop_clip(self):
+        async with self.lock:
+            self.play_id += 1
+            vc = self.voice
+            if vc and (vc.is_playing() or vc.is_paused()):
+                vc.stop()
+            self.q.mark_idle()
+            self.audio_input = None
+            self.idle_since = time.monotonic()
+            self.notify()
 
     # --- Dashboard state ---
 
@@ -497,8 +645,11 @@ class GuildPlayer:
                     for m in listeners[:25]
                 ],
             }
+        current = q.current.to_dict() if q.current else None
+        if self.game is not None:
+            current = self.game.placeholder()  # no peeking at the answer
         return {
-            "current": q.current.to_dict() if q.current else None,
+            "current": current,
             "position": round(q.position, 2) if q.current else 0,
             "rate": q.rate,
             "paused": bool(in_voice and vc.is_paused()),
@@ -510,6 +661,8 @@ class GuildPlayer:
             "queue_duration": q.duration,
             "history": [s.to_dict() for s in itertools.islice(reversed(q.history), STATE_HISTORY_LIMIT)],
             "twenty_four_seven": self.twenty_four_seven,
+            "autoplay": self.autoplay,
+            "game": self.game.public_state() if self.game is not None else None,
             "voice": voice,
             "skip_votes": len(q.skip_votes),
             "skip_needed": len(listeners) // 2 + 1 if len(listeners) > 2 else 0,

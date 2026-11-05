@@ -15,7 +15,10 @@ from mugetsu.ui.announcer import Announcer
 
 log = logging.getLogger("mugetsu")
 
-EXTENSIONS = ("mugetsu.cogs.playback", "mugetsu.cogs.queue", "mugetsu.cogs.effects", "mugetsu.cogs.general")
+EXTENSIONS = (
+    "mugetsu.cogs.playback", "mugetsu.cogs.queue", "mugetsu.cogs.playlists", "mugetsu.cogs.games",
+    "mugetsu.cogs.effects", "mugetsu.cogs.general",
+)
 
 
 class MugetsuBot(commands.Bot):
@@ -61,6 +64,7 @@ class MugetsuBot(commands.Bot):
             gc.collect()
             gc.freeze()
             self._gc_frozen = True
+        await self.players.restore_sessions()  # only does anything once, after a restart
 
     async def on_command_error(self, ctx: commands.Context, error: Exception):
         if isinstance(error, commands.CommandNotFound):

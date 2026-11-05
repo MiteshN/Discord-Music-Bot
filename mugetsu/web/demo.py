@@ -60,6 +60,7 @@ class DemoPlayer:
         self.q = GuildQueue()
         self.volume = 1.0
         self.twenty_four_seven = False
+        self.autoplay = False
         self.paused = False
         self.channel = channel
         self.listeners = [
@@ -90,6 +91,8 @@ class DemoPlayer:
             "queue_duration": q.duration,
             "history": [s.to_dict() for s in reversed(q.history)][:20],
             "twenty_four_seven": self.twenty_four_seven,
+            "autoplay": self.autoplay,
+            "game": None,
             "voice": {"channel": self.channel, "listeners": self.listeners} if in_voice else None,
             "skip_votes": 0,
             "skip_needed": 0,
@@ -114,6 +117,14 @@ class DemoBackend:
             3: DemoPlayer(3, channel="Focus", listeners=2, songs=3),
         }
         self._ticker: asyncio.Task | None = None
+        rng = random.Random(7)
+        self._playlists: dict[str, dict] = {
+            name: {"name": name, "share_code": code, "tracks": [_song(i, ("You", 5)).to_record() for i in picks]}
+            for name, code, picks in (
+                ("Late night drive", "NIGHT7QX", rng.sample(range(len(CATALOG)), 8)),
+                ("Gym", None, rng.sample(range(len(CATALOG)), 5)),
+            )
+        }
 
     def start(self):
         self._ticker = asyncio.create_task(self._tick())
@@ -127,6 +138,10 @@ class DemoBackend:
                     self._advance(p)
 
     def _advance(self, p: DemoPlayer, *, skipping: bool = False):
+        if p.autoplay and not p.q.queue and p.q.current is not None and not skipping:
+            p.q.add([_song(random.randrange(len(CATALOG)), ("Autoplay", 0)) for _ in range(2)])
+            for s in list(p.q.queue)[-2:]:
+                s.requester, s.requester_id, s.requester_avatar = "Autoplay", 0, ""
         nxt = p.q.advance(skipping=skipping)
         if nxt:
             p.q.mark_playing(0)
@@ -247,6 +262,56 @@ class DemoBackend:
             case "247":
                 p.twenty_four_seven = bool(args["enabled"])
                 return "24/7 mode on." if p.twenty_four_seven else "24/7 mode off."
+            case "autoplay":
+                p.autoplay = bool(args["enabled"])
+                return "Autoplay on: I'll keep playing similar songs." if p.autoplay else "Autoplay off."
+            case "removedupes":
+                seen = {q.current.key} if q.current else set()
+                removed = q.remove_where(lambda _i, s: s.key in seen or seen.add(s.key))
+                if not removed:
+                    raise PlayerError("There are no duplicates in the queue.")
+                return f"Removed {len(removed)} songs."
+            case "removeabsent":
+                here = {int(listener["id"]) for listener in p.listeners}
+                removed = q.remove_where(lambda _i, s: s.requester_id not in here and s.requester_id not in (0, 205))
+                if not removed:
+                    raise PlayerError("Everyone with songs in the queue is still here.")
+                return f"Removed {len(removed)} songs."
+            case "removeuser":
+                uid = int(args["user_id"])
+                removed = q.remove_where(lambda _i, s: s.requester_id == uid)
+                if not removed:
+                    raise PlayerError("They have nothing in the queue.")
+                return f"Removed {len(removed)} songs."
+            case "save":
+                self._need_song(q)
+                return "Sent to your DMs (demo: nothing was really sent)."
+            case "playrecent":
+                songs = [_song(i, ("You", 5)) for i in random.sample(range(len(CATALOG)), int(args.get("count", 5)))]
+                q.add(songs)
+                return f"Added {len(songs)} songs from your recent songs"
+            case "savequeue" | "savecurrent":
+                name = str(args.get("name", "")).strip()
+                if not name:
+                    raise PlayerError("Give the playlist a name.")
+                songs = ([q.current] if q.current else []) if action == "savecurrent" else (
+                    ([q.current] if q.current else []) + list(q.queue))
+                entry = self._playlists.setdefault(name, {"name": name, "share_code": None, "tracks": []})
+                records = [s.to_record() for s in songs]
+                entry["tracks"] = entry["tracks"] + records if action == "savecurrent" else records
+                return f"Saved {len(entry['tracks'])} songs to {name}"
+            case "loadplaylist":
+                entry = self._playlists.get(str(args.get("name", "")))
+                if not entry:
+                    raise PlayerError("That playlist doesn't exist.")
+                songs = [Song.from_record(r, {"requester": "You", "requester_id": 205,
+                                              "requester_avatar": DEMO_USER["avatar"]}) for r in entry["tracks"]]
+                if args.get("shuffle"):
+                    random.shuffle(songs)
+                q.add(songs)
+                if q.current is None:
+                    self._advance(p)
+                return f"Added {len(songs)} songs from {entry['name']}"
             case "add":
                 query = str(args.get("query", "")).strip().lower()
                 if not query:
@@ -264,6 +329,13 @@ class DemoBackend:
 
     async def search(self, guild_id: int, query: str) -> dict:
         await asyncio.sleep(0.3)
+        if query.lower().startswith("radio"):
+            names = ["Lofi Hours", "Night Jazz FM", "Tokyo Beats", "Ambient Drift", "Synthwave City", "Morning Acoustic"]
+            return {"songs": [], "albums": [], "videos": [], "stations": [
+                {"uuid": f"demo-{i}", "name": n, "favicon": f"https://picsum.photos/seed/radio{i}/120/120",
+                 "country": ["Japan", "France", "Canada"][i % 3], "tags": ["lofi", "chill"], "bitrate": 128,
+                 "summary": f"{['Japan', 'France', 'Canada'][i % 3]} · lofi, chill · 128 kbps"}
+                for i, n in enumerate(names)]}
         words = query.lower().split()
         hits = [i for i, (a, n, _) in enumerate(CATALOG) if any(w in f"{a} {n}".lower() for w in words)]
         hits = hits or random.sample(range(len(CATALOG)), 5)
@@ -276,7 +348,7 @@ class DemoBackend:
         videos = [{"title": f"{CATALOG[i][0]} - {CATALOG[i][1]} (Live Session)", "url": CATALOG[i][1],
                    "duration": CATALOG[i][2] + 31, "thumbnail": f"https://picsum.photos/seed/video{i}/480/270"}
                   for i in hits[:5]]
-        return {"songs": songs, "albums": albums, "videos": videos}
+        return {"songs": songs, "albums": albums, "videos": videos, "stations": []}
 
     async def lyrics(self, guild_id: int) -> dict | None:
         song = self.players[guild_id].q.current
@@ -289,6 +361,62 @@ class DemoBackend:
             synced[i]["text"] = ""  # instrumental gaps
         return {"song_id": song.id, "title": song.title, "plain": "\n".join(s["text"] for s in synced),
                 "synced": synced, "source": "Demo"}
+
+
+    async def stats(self, guild_id: int, period: str) -> dict:
+        if period not in ("week", "month", "all"):
+            raise PlayerError("Period must be week, month or all.")
+        scale = {"week": 1, "month": 4, "all": 15}[period]
+        rng = random.Random(guild_id * 31 + scale)
+        songs = rng.sample(range(len(CATALOG)), 8)
+        top_songs = [{"title": f"{CATALOG[i][0]} - {CATALOG[i][1]}", "artist": CATALOG[i][0], "url": "",
+                      "thumbnail": f"https://picsum.photos/seed/mugetsu{i}/300/300",
+                      "plays": max(1, (24 - n * 3) * scale + rng.randint(0, 3)), "seconds": CATALOG[i][2] * 9 * scale}
+                     for n, i in enumerate(songs)]
+        people = [{"id": str(200 + n), "name": name, "avatar": f"https://cdn.discordapp.com/embed/avatars/{n}.png",
+                   "plays": (40 - n * 7) * scale, "seconds": (40 - n * 7) * scale * 210} for name, n in PEOPLE]
+        artists = [{"name": CATALOG[i][0], "plays": (18 - n * 2) * scale} for n, i in enumerate(songs[:6])]
+        plays = sum(p["plays"] for p in people)
+        return {"plays": plays, "seconds": plays * 205, "requesters": len(people), "since": time.time() - scale * 7 * 86400,
+                "top_songs": top_songs, "top_requesters": people, "top_artists": artists, "period": period}
+
+    async def playlists(self, user_id: int) -> list[dict]:
+        out = []
+        for entry in self._playlists.values():
+            tracks = entry["tracks"]
+            out.append({"name": entry["name"], "share_code": entry["share_code"], "count": len(tracks),
+                        "duration": sum(t.get("duration", 0) for t in tracks),
+                        "tracks": [{k: t.get(k, "") for k in ("title", "artist", "duration", "thumbnail", "url")}
+                                   for t in tracks]})
+        return out
+
+    async def playlist_action(self, user_id: int, action: str, args: dict) -> str:
+        name = str(args.get("name", ""))
+        entry = self._playlists.get(name)
+        match action:
+            case "delete":
+                if self._playlists.pop(name, None) is None:
+                    raise PlayerError("That playlist doesn't exist.")
+                return f"Deleted {name}"
+            case "rename":
+                new = str(args.get("new_name", "")).strip()
+                if entry is None or not new or new in self._playlists:
+                    raise PlayerError("Can't rename that.")
+                self._playlists[new] = {**self._playlists.pop(name), "name": new}
+                return f"Renamed to {new}"
+            case "share":
+                if entry is None:
+                    raise PlayerError("That playlist doesn't exist.")
+                entry["share_code"] = entry["share_code"] or "DEMO" + str(random.randint(1000, 9999))
+                return entry["share_code"]
+            case "copy":
+                return "Copied (demo)"
+            case "removetrack":
+                if entry is None:
+                    raise PlayerError("That playlist doesn't exist.")
+                removed = entry["tracks"].pop(int(args["index"]))
+                return f"Removed {removed['title']}"
+        raise KeyError(action)
 
 
 def main():

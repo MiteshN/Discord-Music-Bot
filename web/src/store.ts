@@ -1,10 +1,10 @@
 import { create } from "zustand";
 import { ApiError, api } from "./lib/api";
-import type { Activity, BotInfo, Guild, PlayerState, PositionUpdate, User } from "./types";
+import type { Activity, BotInfo, Guild, PlayerState, Playlist, PositionUpdate, User } from "./types";
 
 export type AuthStatus = "loading" | "signed-out" | "signed-in" | "offline";
 export type Connection = "idle" | "connecting" | "live" | "reconnecting";
-export type Panel = "queue" | "lyrics" | "history";
+export type Panel = "queue" | "lyrics" | "playlists" | "history";
 export type MobileView = "player" | Panel;
 export type ToastKind = "info" | "success" | "error" | "activity";
 
@@ -39,6 +39,8 @@ interface Store {
   panel: Panel;
   mobileView: MobileView;
   searchOpen: boolean;
+  statsOpen: boolean;
+  playlists: Playlist[] | null;
 
   boot(): Promise<void>;
   refreshGuilds(): Promise<void>;
@@ -55,6 +57,9 @@ interface Store {
   setPanel(panel: Panel): void;
   setMobileView(view: MobileView): void;
   setSearchOpen(open: boolean): void;
+  setStatsOpen(open: boolean): void;
+  loadPlaylists(): Promise<void>;
+  playlistAction(action: string, args: Record<string, unknown>, success?: string): Promise<string | null>;
 }
 
 const GUILD_KEY = "mugetsu.guild";
@@ -82,6 +87,8 @@ export const useStore = create<Store>((set, get) => ({
   panel: "queue",
   mobileView: "player",
   searchOpen: false,
+  statsOpen: false,
+  playlists: null,
 
   async boot() {
     try {
@@ -209,6 +216,31 @@ export const useStore = create<Store>((set, get) => ({
 
   setSearchOpen(searchOpen) {
     set({ searchOpen });
+  },
+
+  setStatsOpen(statsOpen) {
+    set({ statsOpen });
+  },
+
+  async loadPlaylists() {
+    try {
+      set({ playlists: await api.playlists() });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) get().signedOut();
+      else get().toast((err as Error).message, "error");
+    }
+  },
+
+  async playlistAction(action, args, success) {
+    try {
+      const { message } = await api.playlistAction(action, args);
+      if (success !== undefined) get().toast(success || message, "success");
+      get().loadPlaylists();
+      return message;
+    } catch (err) {
+      get().toast((err as Error).message, "error");
+      return null;
+    }
   },
 }));
 

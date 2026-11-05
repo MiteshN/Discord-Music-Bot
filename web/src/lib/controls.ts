@@ -125,4 +125,43 @@ export const controls = {
   add(query: string, top = false) {
     return get().act("add", { query, top }, { announce: true, key: "add" });
   },
+
+  setAutoplay(enabled: boolean) {
+    get().act("autoplay", { enabled }, { announce: true, optimistic: (s) => ({ ...s, autoplay: enabled }) });
+  },
+
+  removeDuplicates() {
+    get().act("removedupes", {}, { announce: true });
+  },
+
+  removeAbsent() {
+    get().act("removeabsent", {}, { announce: true });
+  },
+
+  removeMine() {
+    const me = get().user?.id;
+    if (me) get().act("removeuser", { user_id: me }, { announce: true });
+  },
+
+  saveToDMs() {
+    get().act("save", {}, { announce: true });
+  },
+
+  playRecent(count = 10) {
+    get().act("playrecent", { count }, { announce: true, key: "playrecent" });
+  },
+
+  async saveQueue(name: string) {
+    const message = await get().act("savequeue", { name }, { announce: true });
+    if (message) get().loadPlaylists();
+  },
+
+  async addCurrentTo(name: string) {
+    const message = await get().act("savecurrent", { name }, { announce: true, key: `savecurrent:${name}` });
+    if (message) get().loadPlaylists();
+  },
+
+  loadPlaylist(name: string, shuffle = false) {
+    get().act("loadplaylist", { name, shuffle }, { announce: true, key: `load:${name}` });
+  },
 };

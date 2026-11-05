@@ -158,3 +158,73 @@ class TestBotBackend:
         assert backend.state(guild.id)["current"]["title"] == "one"
         listed = backend.guilds_for({str(guild.id), "777"})
         assert listed == [{"id": "1", "name": "Guild 1", "icon": None, "playing": True}]
+
+
+async def test_stats_and_playlist_endpoints(client):
+    await sign_in(client)
+    stats = await (await client.get("/api/guilds/1/stats?period=month")).get_json()
+    assert stats["period"] == "month" and stats["top_songs"] and stats["plays"] > 0
+    assert (await client.get("/api/guilds/1/stats?period=decade")).status_code == 400
+    lists = await (await client.get("/api/playlists")).get_json()
+    assert {p["name"] for p in lists} >= {"Late night drive", "Gym"}
+    resp = await client.post("/api/playlists/actions/share", headers=HEADERS, json={"name": "Gym"})
+    assert len((await resp.get_json())["message"]) == 8
+    assert (await client.post("/api/playlists/actions/share", json={"name": "Gym"})).status_code == 400  # CSRF
+    assert (await client.post("/api/playlists/actions/explode", headers=HEADERS)).status_code == 400
+    resp = await client.post("/api/guilds/1/actions/loadplaylist", headers=HEADERS, json={"name": "Gym"})
+    assert "Added 5 songs" in (await resp.get_json())["message"]
+
+
+class TestBotBackendFeatures:
+    @pytest.fixture
+    async def setup(self, manager, guild):
+        guild.roles.append(FakeRole("DJ"))
+        bot = FakeBot(guild)
+        bot.players = manager
+        manager.bot = bot
+        await guild.channel.connect()
+        player = manager.get(guild.id)
+        return BotBackend(bot), guild, player
+
+    async def test_playlists_round_trip(self, setup):
+        backend, guild, player = setup
+        dee = guild.member(32, "Dee", dj=True)
+        await player.enqueue([make_song("one"), make_song("two")])
+        assert "Saved 2 songs" in await backend.act(guild.id, 32, "savequeue", {"name": "Mine"})
+        lists = await backend.playlists(32)
+        assert lists[0]["name"] == "Mine" and lists[0]["count"] == 2
+        code = await backend.playlist_action(32, "share", {"name": "Mine"})
+        assert "Copied 2 songs" in await backend.playlist_action(40, "copy", {"code": code, "name": "Theirs"})
+        await player.clear(dee)
+        assert "Added 2 songs" in await backend.act(guild.id, 32, "loadplaylist", {"name": "Mine"})
+        assert [s.requester for s in player.q.queue] == ["Dee", "Dee"]  # loaded songs are yours
+
+    async def test_toggles_and_cleanup(self, setup):
+        backend, guild, player = setup
+        guild.member(31, "Pat")
+        await player.enqueue([make_song("now"), make_song("x", requester_id=31), make_song("y", requester_id=77)])
+        assert "Autoplay" in await backend.act(guild.id, 31, "autoplay", {"enabled": True})
+        assert backend.state(guild.id)["autoplay"] is True
+        with pytest.raises(PlayerError, match="DJ"):
+            await backend.act(guild.id, 31, "removeabsent", {})
+        assert "Removed" in await backend.act(guild.id, 31, "removeuser", {"user_id": "31"})
+        assert [s.title for s in player.q.queue] == ["y"]
+
+    async def test_save_sends_a_dm(self, setup):
+        backend, guild, player = setup
+        pat = guild.member(31, "Pat")
+        await player.enqueue([make_song("lovely")])
+        assert "DMs" in await backend.act(guild.id, 31, "save", {})
+        assert pat.dms
+
+    async def test_lyrics_are_hidden_during_a_game(self, setup):
+        backend, guild, player = setup
+        guild.member(31, "Pat")
+        await player.enqueue([make_song("secret")])
+        player.game = object()
+        try:
+            assert await backend.lyrics(guild.id) is None
+            with pytest.raises(PlayerError, match="peeking"):
+                await backend.act(guild.id, 31, "save", {})
+        finally:
+            player.game = None

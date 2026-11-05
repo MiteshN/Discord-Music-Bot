@@ -49,10 +49,11 @@ async def manager(guild, tmp_path, monkeypatch):
     monkeypatch.setattr(player_module, "PREFETCH_DELAY", 0)
     bot = FakeBot(guild)
     mgr = PlayerManager(bot, Config(cache_dir=tmp_path, cache_limit_mb=0))
+    await mgr.store.initialize()
     mgr.hooks = RecordingHooks()
     mgr.failing: set[str] = set()
 
-    async def resolve_input(song):
+    async def resolve_input(song, cache=True):
         if song.title in mgr.failing:
             raise RuntimeError("Video unavailable")
         return AudioInput(f"/cache/{song.title}.opus", is_local=True, is_opus=True)
@@ -71,7 +72,12 @@ async def manager(guild, tmp_path, monkeypatch):
     yield mgr
     for guild_id in list(mgr._players):
         await mgr.destroy(guild_id)
+    for handle in mgr._pending_saves.values():
+        handle.cancel()
     await settle()
+    if mgr._background:
+        await asyncio.gather(*mgr._background, return_exceptions=True)
+    await mgr.store.close()
 
 
 @pytest.fixture

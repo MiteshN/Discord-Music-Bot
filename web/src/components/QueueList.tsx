@@ -9,8 +9,8 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ArrowUpToLine, GripVertical, ListMusic, ListX, Play, Shuffle, X } from "lucide-react";
-import { useState } from "react";
+import { ArrowUpToLine, CopyX, Ellipsis, GripVertical, Infinity as InfinityIcon, ListMusic, ListX, Play, RotateCcwClock, Shuffle, UserMinus, Users, X } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { controls } from "../lib/controls";
 import { formatLong, formatTime, plural, splitTitle } from "../lib/format";
 import { useStore } from "../store";
@@ -71,6 +71,68 @@ function Row({ song, index }: { song: Song; index: number }) {
   );
 }
 
+function MenuItem({ icon, children, onClick, disabled }: { icon: ReactNode; children: string; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      disabled={disabled}
+      onClick={onClick}
+      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-ink-2 hover:bg-panel-3 hover:text-ink disabled:opacity-40"
+    >
+      <span className="text-ink-3">{icon}</span>
+      {children}
+    </button>
+  );
+}
+
+function QueueMenu({ total }: { total: number }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const run = (fn: () => void) => () => {
+    setOpen(false);
+    fn();
+  };
+
+  return (
+    <div ref={ref} className="relative">
+      <IconButton label="More queue actions" size="sm" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <Ellipsis size={17} />
+      </IconButton>
+      {open && (
+        <div role="menu" className="absolute right-0 top-full z-30 mt-1.5 w-64 animate-pop rounded-2xl border border-line-2 bg-[#15141d]/95 p-1.5 shadow-[0_24px_60px_-15px_rgb(0_0_0/0.9)] backdrop-blur-2xl">
+          <MenuItem icon={<CopyX size={16} />} disabled={total < 2} onClick={run(controls.removeDuplicates)}>
+            Remove duplicates
+          </MenuItem>
+          <MenuItem icon={<Users size={16} />} disabled={!total} onClick={run(controls.removeAbsent)}>
+            Remove songs from people who left
+          </MenuItem>
+          <MenuItem icon={<UserMinus size={16} />} disabled={!total} onClick={run(controls.removeMine)}>
+            Remove my songs
+          </MenuItem>
+          <div className="my-1 h-px bg-line" />
+          <MenuItem icon={<RotateCcwClock size={16} />} onClick={run(() => controls.playRecent(10))}>
+            Queue my recent songs
+          </MenuItem>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function QueueList() {
   const player = useStore((s) => s.player);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -102,6 +164,14 @@ export function QueueList() {
           )}
         </p>
         <div className="flex gap-1">
+          <IconButton
+            label={player.autoplay ? "Autoplay is on: similar songs play when the queue runs out" : "Autoplay: keep playing similar songs when the queue runs out"}
+            size="sm"
+            active={player.autoplay}
+            onClick={() => controls.setAutoplay(!player.autoplay)}
+          >
+            <InfinityIcon size={17} />
+          </IconButton>
           <IconButton label="Shuffle queue" size="sm" disabled={total < 2} onClick={controls.shuffle}>
             <Shuffle size={16} />
           </IconButton>
@@ -123,6 +193,7 @@ export function QueueList() {
           >
             <ListX size={17} />
           </IconButton>
+          <QueueMenu total={total} />
         </div>
       </div>
 
@@ -132,7 +203,11 @@ export function QueueList() {
             <ListMusic size={24} />
           </span>
           <p className="text-[15px] font-medium text-ink-2">Your queue is empty</p>
-          <p className="text-sm">Search for songs, albums or paste a playlist link to fill it up.</p>
+          <p className="text-sm">
+            {player.autoplay
+              ? "Autoplay is on, so similar songs will follow whatever plays next."
+              : "Search for songs, albums or paste a playlist link to fill it up. Or turn on autoplay (∞) to keep the music going."}
+          </p>
         </div>
       ) : (
         <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-3 pb-4">

@@ -5,6 +5,20 @@ import { useStore } from "../store";
 import { Artwork } from "./ui/Artwork";
 import { IconButton } from "./ui/Buttons";
 
+function RecentButton() {
+  const busy = useStore((s) => s.busy.playrecent);
+  return (
+    <button
+      type="button"
+      onClick={() => controls.playRecent(10)}
+      disabled={busy}
+      className="mt-1 inline-flex items-center gap-2 rounded-xl border border-line px-3 py-2 text-sm font-medium text-ink-2 transition-colors hover:border-line-2 hover:bg-panel-2 hover:text-ink disabled:opacity-50"
+    >
+      <RotateCcwClock size={15} /> Queue my 10 most recent requests
+    </button>
+  );
+}
+
 export function HistoryList() {
   const history = useStore((s) => s.player?.history ?? []);
   const busy = useStore((s) => s.busy.add);
@@ -17,12 +31,16 @@ export function HistoryList() {
         </span>
         <p className="text-[15px] font-medium text-ink-2">Nothing played yet</p>
         <p className="text-sm">Songs show up here after they play, so you can bring them back.</p>
+        <RecentButton />
       </div>
     );
   }
 
   return (
     <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-3 pb-4">
+      <div className="px-1 pb-2">
+        <RecentButton />
+      </div>
       <ol className="flex flex-col gap-0.5">
         {history.map((song, i) => {
           const { name, by } = splitTitle(song.title, song.artist);

@@ -115,6 +115,19 @@ class GuildQueue:
         self.queue.insert(to_idx, song)
         return True
 
+    def remove_indices(self, indices: list[int]) -> list[Song]:
+        """Remove the songs at these positions (bad ones are ignored). Returns what was removed."""
+        wanted = {i for i in indices if 0 <= i < len(self.queue)}
+        return self.remove_where(lambda i, _song: i in wanted)
+
+    def remove_where(self, condition) -> list[Song]:
+        """Remove every song for which condition(index, song) is true. Returns what was removed."""
+        kept, removed = deque(), []
+        for i, song in enumerate(self.queue):
+            (removed if condition(i, song) else kept).append(song)
+        self.queue = kept
+        return removed
+
     def drop_before(self, index: int) -> list[Song]:
         """Take the songs ahead of ``index`` off the queue, so it becomes the next one."""
         if not 0 <= index < len(self.queue):

@@ -1,5 +1,5 @@
 export type LoopMode = "off" | "track" | "queue";
-export type Source = "youtube" | "spotify" | "soundcloud" | "bandcamp" | "web";
+export type Source = "youtube" | "spotify" | "soundcloud" | "bandcamp" | "radio" | "game" | "web";
 
 export interface Song {
   id: number;
@@ -34,6 +34,8 @@ export interface PlayerState {
   queue_duration: number;
   history: Song[];
   twenty_four_seven: boolean;
+  autoplay: boolean;
+  game: GameState | null;
   voice: { channel: string; listeners: Listener[] } | null;
   skip_votes: number;
   skip_needed: number;
@@ -93,10 +95,59 @@ export interface Video {
   thumbnail: string;
 }
 
+export interface Station {
+  uuid: string;
+  name: string;
+  favicon: string;
+  country: string;
+  tags: string[];
+  bitrate: number;
+  summary: string;
+}
+
 export interface SearchResults {
   songs: SpotifySong[];
   albums: SpotifyAlbum[];
   videos: Video[];
+  stations: Station[];
+}
+
+export interface GameState {
+  round: number;
+  rounds: number;
+  clip_seconds: number;
+  starter: string;
+  scores: { id: string; name: string; points: number }[];
+  last: { title: string; artist: string; thumbnail: string } | null;
+}
+
+export type StatsPeriod = "week" | "month" | "all";
+
+export interface Stats {
+  period: StatsPeriod;
+  plays: number;
+  seconds: number;
+  requesters: number;
+  since: number | null;
+  top_songs: { title: string; artist: string; url: string; thumbnail: string; plays: number; seconds: number }[];
+  top_requesters: { id: string; name: string; avatar: string; plays: number; seconds: number }[];
+  top_artists: { name: string; plays: number }[];
+}
+
+export interface PlaylistTrack {
+  title: string;
+  artist: string;
+  duration: number;
+  thumbnail: string;
+  url: string;
+}
+
+export interface Playlist {
+  name: string;
+  share_code: string | null;
+  count: number;
+  duration: number;
+  tracks: PlaylistTrack[];
 }
 
 export interface LyricLine {

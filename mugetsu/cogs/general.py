@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+from typing import Literal
+
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 from mugetsu.cogs.common import MusicCog
 from mugetsu.player.models import PlayerError
 from mugetsu.ui import embeds
 
-COG_ORDER = ("Playback", "Queue", "Effects", "General")
+COG_ORDER = ("Playback", "Queue", "Playlists", "Games", "Effects", "General")
 
 
 def _fields(lines: list[str], limit: int = 1024) -> list[str]:
@@ -29,6 +32,15 @@ class General(MusicCog):
     async def twenty_four_seven(self, ctx: commands.Context):
         player = self.player(ctx)
         await ctx.send(await player.set_247(not player.twenty_four_seven, ctx.author))
+
+    @commands.hybrid_command(name="stats", aliases=["wrapped"], description="This server's top songs, requesters and listening time")
+    @app_commands.describe(period="week, month or all time")
+    async def stats(self, ctx: commands.Context, period: Literal["week", "month", "all"] = "week"):
+        data = await self.players.stats(ctx.guild.id, period)
+        embed = embeds.stats(data, ctx.guild.name)
+        if self.bot.config.public_dashboard_url:
+            embed.set_footer(text=f"More on the dashboard: {self.bot.config.public_dashboard_url}")
+        await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="cachestats", description="Show audio cache statistics")
     async def cachestats(self, ctx: commands.Context):
@@ -61,7 +73,16 @@ class General(MusicCog):
             cog = self.bot.get_cog(name)
             if cog is None:
                 continue
-            lines = [f"`{prefix}{c.name}` {c.description}" for c in cog.get_commands() if not c.hidden]
+            lines = []
+            for c in cog.get_commands():
+                if c.hidden:
+                    continue
+                if isinstance(c, commands.Group):  # list subcommands, e.g. /playlist save
+                    lines += [f"`{prefix}{c.name} {sub.name}` {sub.description}" for sub in c.commands]
+                    if getattr(c, "fallback", None):
+                        lines.insert(len(lines) - len(c.commands), f"`{prefix}{c.name} {c.fallback}` {c.description}")
+                else:
+                    lines.append(f"`{prefix}{c.name}` {c.description}")
             for i, chunk in enumerate(_fields(lines)):
                 embed.add_field(name=name if i == 0 else f"{name} (cont.)", value=chunk, inline=False)
         if self.bot.config.public_dashboard_url:

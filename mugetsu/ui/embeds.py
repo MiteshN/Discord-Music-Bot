@@ -129,3 +129,85 @@ def cache_stats(stats: dict) -> discord.Embed:
     embed.add_field(name="Size", value=f"{stats['total_size_mb']} / {stats['max_size_mb']} MB")
     embed.add_field(name="Hit rate", value=f"{ratio} ({stats['hits']} hits, {stats['misses']} misses)", inline=False)
     return embed
+
+
+def saved_song(song: Song, guild_name: str) -> discord.Embed:
+    """The card sent to someone's DMs when they ♥ a song."""
+    embed = discord.Embed(description=f"### {md_link(song, 200)}", color=ACCENT)
+    embed.set_author(name="♥ Saved from " + guild_name[:200])
+    if song.thumbnail:
+        embed.set_thumbnail(url=song.thumbnail)
+    if song.artist and song.source != "radio":
+        embed.add_field(name="Artist", value=discord.utils.escape_markdown(song.artist)[:1024])
+    if song.duration:
+        embed.add_field(name="Length", value=song_length(song))
+    return embed
+
+
+def stats(data: dict, guild_name: str) -> discord.Embed:
+    labels = {"week": "this week", "month": "this month", "all": "all time"}
+    embed = discord.Embed(title=f"📊 {guild_name[:200]} · {labels.get(data['period'], data['period'])}", color=ACCENT)
+    if not data["plays"]:
+        embed.description = "Nothing played yet. Get the music going!"
+        return embed
+    hours = data["seconds"] / 3600
+    listened = f"{hours:.1f} hours" if hours >= 1 else f"{data['seconds'] // 60} minutes"
+    embed.description = f"**{data['plays']}** plays · **{listened}** of music · **{data['requesters']}** people requesting"
+    if data["top_songs"]:
+        embed.add_field(name="Top songs", value="\n".join(
+            f"`{i}.` {discord.utils.escape_markdown(s['title'][:70])} · **{s['plays']}**"
+            for i, s in enumerate(data["top_songs"][:5], 1)
+        ), inline=False)
+    if data["top_requesters"]:
+        embed.add_field(name="Top requesters", value="\n".join(
+            f"`{i}.` {discord.utils.escape_markdown(p['name'])} · **{p['plays']}**"
+            for i, p in enumerate(data["top_requesters"][:5], 1)
+        ))
+    if data["top_artists"]:
+        embed.add_field(name="Top artists", value="\n".join(
+            f"`{i}.` {discord.utils.escape_markdown(a['name'][:40])} · **{a['plays']}**"
+            for i, a in enumerate(data["top_artists"][:5], 1)
+        ))
+    return embed
+
+
+def playlist_list(name: str, playlists) -> discord.Embed:
+    embed = discord.Embed(title=f"🎶 {name}'s playlists", color=ACCENT)
+    if not playlists:
+        embed.description = "No playlists yet. Save the queue with `/playlist save`."
+        return embed
+    embed.description = "\n".join(
+        f"**{discord.utils.escape_markdown(p.name)}** · {len(p.tracks)} songs · {format_duration(p.duration)}"
+        + (f" · code `{p.share_code}`" if p.share_code else "")
+        for p in playlists[:25]
+    )
+    return embed
+
+
+def playlist_detail(playlist, page: int = 1) -> discord.Embed:
+    per = 15
+    pages = max(1, -(-len(playlist.tracks) // per))
+    page = min(max(page, 1), pages)
+    start = (page - 1) * per
+    lines = [
+        f"`{i}.` {discord.utils.escape_markdown(t.get('title', '?')[:70])}"
+        + (f" · `{format_duration(t['duration'])}`" if t.get("duration") else "")
+        for i, t in enumerate(playlist.tracks[start:start + per], start + 1)
+    ]
+    embed = discord.Embed(title=f"🎶 {playlist.name}", description="\n".join(lines) or "*Empty*", color=ACCENT)
+    footer = [f"Page {page}/{pages}", f"{len(playlist.tracks)} songs", format_duration(playlist.duration)]
+    if playlist.share_code:
+        footer.append(f"Share code {playlist.share_code}")
+    embed.set_footer(text=" · ".join(footer))
+    return embed
+
+
+def game_leaderboard(rows: list[dict], guild_name: str) -> discord.Embed:
+    embed = discord.Embed(title=f"🎮 Guess the song · {guild_name[:200]}", color=ACCENT)
+    medals = ["🥇", "🥈", "🥉"]
+    embed.description = "\n".join(
+        f"{medals[i] if i < 3 else f'`{i + 1}.`'} **{discord.utils.escape_markdown(r['name'])}**: "
+        f"{r['points']} points · {r['wins']} wins in {r['games']} games"
+        for i, r in enumerate(rows)
+    ) or "No games played yet. Start one with `/guessthesong play`."
+    return embed

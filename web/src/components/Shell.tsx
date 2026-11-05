@@ -1,4 +1,4 @@
-import { CircleCheck, CircleExclamationPoint, Disc3, Info, ListMusic, MicVocal, Pause, Play, RotateCcwClock, SkipForward, X } from "lucide-react";
+import { CircleCheck, CircleExclamationPoint, Disc3, Info, Library, ListMusic, MicVocal, Pause, Play, RotateCcwClock, SkipForward, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { controls } from "../lib/controls";
 import { splitTitle } from "../lib/format";
@@ -70,6 +70,7 @@ export function Toasts() {
 const PANELS: { id: Panel; label: string; icon: typeof ListMusic }[] = [
   { id: "queue", label: "Up next", icon: ListMusic },
   { id: "lyrics", label: "Lyrics", icon: MicVocal },
+  { id: "playlists", label: "Playlists", icon: Library },
   { id: "history", label: "History", icon: RotateCcwClock },
 ];
 
@@ -86,7 +87,7 @@ export function PanelTabs() {
           role="tab"
           aria-selected={panel === id}
           onClick={() => setPanel(id)}
-          className={`flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold transition-colors ${
+          className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
             panel === id ? "bg-panel-3 text-ink" : "text-ink-3 hover:bg-panel-2 hover:text-ink-2"
           }`}
         >

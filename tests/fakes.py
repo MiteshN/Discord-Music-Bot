@@ -45,6 +45,27 @@ class FakeMember:
     def mention(self):
         return f"<@{self.id}>"
 
+    async def send(self, *args, **kwargs):  # a DM
+        self.__dict__.setdefault("dms", []).append(kwargs or args)
+
+
+class FakeTextChannel:
+    def __init__(self, channel_id=20):
+        self.id = channel_id
+        self.sent = []
+
+    async def send(self, content=None, **kwargs):
+        self.sent.append(content if content is not None else kwargs.get("embed"))
+
+
+class FakeMessage:
+    def __init__(self, author, channel, content):
+        self.author, self.channel, self.content = author, channel, content
+        self.reactions = []
+
+    async def add_reaction(self, emoji):
+        self.reactions.append(emoji)
+
 
 @dataclass(eq=False)
 class FakeVoiceChannel:

@@ -15,13 +15,15 @@ import discord
 
 from mugetsu.media import youtube
 from mugetsu.media.cache import CacheManager
-from mugetsu.media.ffmpeg import AudioInput, build_source, is_opus
+from mugetsu.media.ffmpeg import AudioInput, build_source, get_filter, is_opus
 from mugetsu.media.lyrics import Lyrics, LyricsFetcher
+from mugetsu.media.radio import RadioBrowser, Station
 from mugetsu.media.spotify import SpotifyResolver
 from mugetsu.player.events import EventBus, StateNotifier
-from mugetsu.player.models import PlayerError, Song
+from mugetsu.player.models import LoopMode, PlayerError, Song, song_key
 from mugetsu.player.player import GuildPlayer
 from mugetsu.player.settings import GuildSettings
+from mugetsu.store import Store
 from mugetsu.util import short_error
 
 if TYPE_CHECKING:
@@ -33,6 +35,11 @@ URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 YOUTUBE_PLAYLIST_RE = re.compile(r"(youtube\.com/.*[?&]list=|youtu\.be/.*[?&]list=)([\w-]+)")
 INACTIVITY_INTERVAL = 30
 SEARCH_TTL = 300
+SESSION_SAVE_DELAY = 2.0  # coalesce bursts of changes into one write
+STATS_PERIODS = {"week": 7 * 86400, "month": 30 * 86400, "all": None}
+AUTOPLAY_BATCH = 3
+AUTOPLAY_MAX_LENGTH = 15 * 60  # skip hour-long mixes and the like
+RADIO_QUERY = "radio:"
 
 
 @dataclass(frozen=True)
@@ -61,6 +68,9 @@ class PlayerHooks:
     async def track_cleared(self, player: GuildPlayer):
         pass
 
+    async def resumed(self, player: GuildPlayer, song: Song, position: float):
+        pass
+
 
 class PlayerManager:
     def __init__(self, bot: discord.Client, config: Config):
@@ -70,6 +80,8 @@ class PlayerManager:
         self.cache = CacheManager(config.cache_dir, config.cache_limit_mb, config.max_cache_duration)
         self.spotify = SpotifyResolver(config.spotify_client_id, config.spotify_client_secret)
         self.lyrics = LyricsFetcher(config.genius_token)
+        self.store = Store(config.cache_dir)
+        self.radio = RadioBrowser(lambda: self.http)
         self.http: aiohttp.ClientSession | None = None
         self.events = EventBus()
         self.notify = StateNotifier(self.events, self.snapshot)
@@ -79,26 +91,55 @@ class PlayerManager:
         self._inactivity_task: asyncio.Task | None = None
         self._search_cache: OrderedDict[str, tuple[float, dict]] = OrderedDict()
         self._search_slot = asyncio.Semaphore(1)  # keep a worker free for playback
+        self._pending_saves: dict[int, asyncio.TimerHandle] = {}
+        self._background: set[asyncio.Task] = set()
+        self._restored = False
 
     async def start(self):
         await self.settings.initialize()
         await self.cache.initialize()
+        await self.store.initialize()
         self.http = aiohttp.ClientSession()
         self._inactivity_task = asyncio.create_task(self._inactivity_loop())
 
     async def close(self):
         if self._inactivity_task:
             self._inactivity_task.cancel()
+        for handle in self._pending_saves.values():
+            handle.cancel()
         for guild_id in list(self._players):
             try:
-                await self.destroy(guild_id)
+                await self._save_session(guild_id)  # so a restart can pick up from here
+                await self.destroy(guild_id, keep_session=True)
             except Exception:
                 log.exception("[Guild %d] Error while shutting down the player", guild_id)
+        if self._background:
+            await asyncio.gather(*self._background, return_exceptions=True)
         await self.cache.close()
         await self.settings.close()
+        await self.store.close()
         if self.http:
             await self.http.close()
         youtube.shutdown()
+
+    def background(self, coro) -> asyncio.Task:
+        """Run bookkeeping (database writes) without making playback wait for it."""
+        task = asyncio.create_task(coro)
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
+        return task
+
+    def changed(self, guild_id: int):
+        """Something about a guild's player changed: push it to the dashboard and save it for restarts."""
+        self.notify(guild_id)
+        if self.config.resume_window <= 0 or guild_id in self._pending_saves:
+            return
+
+        def save():
+            self._pending_saves.pop(guild_id, None)
+            self.background(self._save_session(guild_id))
+
+        self._pending_saves[guild_id] = asyncio.get_running_loop().call_later(SESSION_SAVE_DELAY, save)
 
     # --- Players ---
 
@@ -116,8 +157,13 @@ class PlayerManager:
         player = self._players.get(guild_id) or GuildPlayer(self, guild_id, self.settings.get(guild_id))
         return player.snapshot()
 
-    async def destroy(self, guild_id: int, *, disconnect: bool = True):
+    async def destroy(self, guild_id: int, *, disconnect: bool = True, keep_session: bool = False):
         """The single path for leaving a guild: reset state and optionally disconnect."""
+        if not keep_session:
+            handle = self._pending_saves.pop(guild_id, None)
+            if handle:
+                handle.cancel()
+            self.background(self.store.clear_session(guild_id))
         player = self._players.pop(guild_id, None)
         if player:
             await player.close(disconnect=disconnect)
@@ -222,8 +268,10 @@ class PlayerManager:
             song.title = track.title
             song.thumbnail = track.thumbnail or song.thumbnail
 
-    async def resolve_input(self, song: Song) -> AudioInput:
+    async def resolve_input(self, song: Song, *, cache: bool = True) -> AudioInput:
         """Where to read audio from: the local cache if possible, otherwise a live stream."""
+        if song.stream_url:  # internet radio: play the station's stream as-is
+            return AudioInput(song.stream_url, is_local=False, is_opus=False)
         checked_key = None
         if song.url:
             checked_key = CacheManager.extract_cache_key(song.url)
@@ -241,7 +289,7 @@ class PlayerManager:
             entry = await self.cache.lookup(key)
             if entry:
                 return AudioInput(entry.path, is_local=True, is_opus=is_opus(entry.acodec, entry.path))
-        if self.cache.cacheable(track.duration, track.is_live):
+        if cache and self.cache.cacheable(track.duration, track.is_live):
             self.cache.schedule_download(
                 key, track.webpage_url, title=song.title, duration=track.duration, thumbnail=song.thumbnail
             )
@@ -249,6 +297,8 @@ class PlayerManager:
 
     async def prefetch(self, song: Song) -> bool:
         """Resolve and start caching a queued song ahead of time. Returns True if its metadata changed."""
+        if song.stream_url:
+            return False
         if song.url and await self.cache.contains(CacheManager.extract_cache_key(song.url)):
             return False
         changed = False
@@ -268,6 +318,15 @@ class PlayerManager:
         query = query.strip().strip("<>")
         if not query:
             raise PlayerError("Type something to play.")
+
+        if query.startswith(RADIO_QUERY):
+            try:
+                station = await self.radio.by_uuid(query.removeprefix(RADIO_QUERY))
+            except Exception as e:
+                raise PlayerError(f"Couldn't reach the radio directory: {short_error(e)}") from e
+            if station is None:
+                raise PlayerError("That radio station isn't listed anymore.")
+            return [self.station_song(station, requester)], ""
 
         if SpotifyResolver.is_spotify_url(query):
             if not self.spotify.enabled:
@@ -327,6 +386,16 @@ class PlayerManager:
         if hit and time.monotonic() - hit[0] < SEARCH_TTL:
             return hit[1]
 
+        if key.startswith("radio ") or key == "radio":
+            try:
+                stations = await self.radio.search(query.strip()[6:], limit=8)
+            except Exception as e:
+                log.warning("Radio search failed for %r: %s", query, e)
+                stations = []
+            result = {"songs": [], "albums": [], "videos": [], "stations": [s.to_dict() for s in stations]}
+            self._search_cache[key] = (time.monotonic(), result)
+            return result
+
         async def spotify():
             if not self.spotify.enabled:
                 return {"songs": [], "albums": []}
@@ -348,6 +417,7 @@ class PlayerManager:
             "songs": found["songs"],
             "albums": found["albums"],
             "videos": found_videos if isinstance(found_videos, list) else [],
+            "stations": [],
         }
         if not failed:
             self._search_cache[key] = (time.monotonic(), result)
@@ -359,3 +429,151 @@ class PlayerManager:
         return await self.lyrics.fetch(
             self.http, song.title, artist=song.artist, track=song.track_name, duration=song.duration
         )
+
+    # --- Internet radio ---
+
+    def station_song(self, station: Station, requester: Requester) -> Song:
+        self.radio.count_click(station.uuid)
+        return Song(
+            title=station.name, query=f"{RADIO_QUERY}{station.uuid}", url=station.homepage,
+            stream_url=station.stream_url, thumbnail=station.favicon, artist=station.summary,
+            **requester.fields(),
+        )
+
+    # --- Play history and stats ---
+
+    async def log_play(self, guild_id: int, song: Song) -> int | None:
+        try:
+            return await self.store.log_play(guild_id, song.to_record())
+        except Exception:
+            log.exception("[Guild %d] Couldn't log a play", guild_id)
+            return None
+
+    async def finish_play(self, logged: asyncio.Task, seconds: float):
+        try:
+            play_id = await logged
+            if play_id is not None:
+                await self.store.finish_play(play_id, seconds)
+        except Exception:
+            log.exception("Couldn't finish logging a play")
+
+    async def stats(self, guild_id: int, period: str = "week") -> dict:
+        if period not in STATS_PERIODS:
+            raise PlayerError("Period must be `week`, `month` or `all`.")
+        window = STATS_PERIODS[period]
+        data = await self.store.stats(guild_id, since=None if window is None else time.time() - window)
+        return {**data, "period": period}
+
+    async def recent_songs(self, guild_id: int, member: discord.abc.User, count: int) -> list[Song]:
+        records = await self.store.recent_requests(guild_id, member.id, count)
+        who = Requester.of(member).fields()
+        return [Song.from_record(r, who) for r in records]
+
+    # --- Autoplay ---
+
+    async def recommend(self, seed: Song, exclude: set[str], count: int = AUTOPLAY_BATCH) -> list[Song]:
+        """Songs to play after `seed` when the queue runs out, skipping anything in `exclude`."""
+        video_id = CacheManager.extract_cache_key(seed.url) if seed.url else ""
+        if len(video_id) != 11 or seed.stream_url:
+            return []
+        try:
+            entries = await youtube.related(video_id)
+        except Exception as e:
+            log.debug("Autoplay lookup failed for %r: %s", seed.title, e)
+            return []
+        songs = []
+        for e in entries:
+            key = song_key(e["url"], e["title"])
+            if key in exclude or key == video_id or not 0 < e["duration"] <= AUTOPLAY_MAX_LENGTH:
+                continue
+            exclude.add(key)
+            artist = e.get("artist") or ""
+            title = f"{artist} - {e['title']}" if artist and artist.lower() not in e["title"].lower() else e["title"]
+            songs.append(Song(title=title, query=e["url"], url=e["url"], duration=e["duration"],
+                              thumbnail=e["thumbnail"], artist=artist, track_name=e["title"],
+                              requester="Autoplay", requester_id=0))
+            if len(songs) >= count:
+                break
+        return songs
+
+    # --- Picking up after a restart ---
+
+    def _session_data(self, player: GuildPlayer) -> dict | None:
+        vc = player.voice
+        if player.game or not vc or not vc.is_connected() or not (player.current or player.q.queue):
+            return None
+        q = player.q
+        return {
+            "voice_channel_id": vc.channel.id,
+            "text_channel_id": player.text_channel_id,
+            "current": q.current.to_record() if q.current else None,
+            "position": round(q.position, 1) if q.current else 0,
+            "paused": vc.is_paused(),
+            "loop": q.loop_mode.value,
+            "effect": q.audio_filter.key if q.audio_filter else "",
+            "queue": [s.to_record() for s in q.queue][:1000],
+        }
+
+    async def _save_session(self, guild_id: int):
+        player = self._players.get(guild_id)
+        data = self._session_data(player) if player else None
+        try:
+            if data:
+                await self.store.save_session(guild_id, data)
+            else:
+                await self.store.clear_session(guild_id)
+        except Exception:
+            log.exception("[Guild %d] Couldn't save the session", guild_id)
+
+    async def restore_sessions(self):
+        """After a restart, rejoin voice and carry on where each server left off."""
+        if self._restored or self.config.resume_window <= 0:
+            return
+        self._restored = True
+        try:
+            sessions = await self.store.sessions(self.config.resume_window)
+        except Exception:
+            log.exception("Couldn't read saved sessions")
+            return
+        for guild_id, data in sessions:
+            try:
+                await self._restore(guild_id, data)
+            except Exception:
+                log.exception("[Guild %d] Couldn't resume the session", guild_id)
+                await self.store.clear_session(guild_id)
+
+    async def _restore(self, guild_id: int, data: dict):
+        guild = self.bot.get_guild(guild_id)
+        channel = guild.get_channel(data.get("voice_channel_id") or 0) if guild else None
+        if channel is None or guild.voice_client:
+            await self.store.clear_session(guild_id)
+            return
+        player = self.get(guild_id)
+        if not any(not m.bot for m in channel.members) and not player.twenty_four_seven:
+            log.info("[Guild %d] Not resuming: nobody is in %s", guild_id, channel.name)
+            await self.destroy(guild_id, disconnect=False)
+            return
+        perms = channel.permissions_for(guild.me)
+        if not (perms.connect and perms.speak):
+            await self.destroy(guild_id, disconnect=False)
+            return
+        await channel.connect(self_deaf=True, timeout=20)
+        player.text_channel_id = data.get("text_channel_id")
+        try:
+            player.q.loop_mode = LoopMode(data.get("loop", "off"))
+        except ValueError:
+            pass
+        try:
+            player.q.audio_filter = get_filter(data.get("effect", ""))
+        except ValueError:
+            pass
+        player.q.add([Song.from_record(r) for r in data.get("queue", [])])
+        current = Song.from_record(data["current"]) if data.get("current") else None
+        position = float(data.get("position") or 0)
+        if current and current.duration and position >= current.duration - 3:
+            position = 0  # it had all but finished
+        started = await player.resume_session(current, position, paused=bool(data.get("paused")))
+        log.info("[Guild %d] Resumed after restart: %s", guild_id, started.title if started else "queue only")
+        if started:
+            await self.hooks.resumed(player, started, position if started is current else 0)
+
