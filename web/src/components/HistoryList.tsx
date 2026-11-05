@@ -36,7 +36,7 @@ export function HistoryList() {
                   {[by, song.duration ? formatTime(song.duration) : "", `added by ${song.requester}`].filter(Boolean).join(" · ")}
                 </div>
               </div>
-              <div className="flex shrink-0 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100">
+              <div className="flex max-w-0 shrink-0 items-center overflow-hidden group-focus-within:max-w-40 group-hover:max-w-40 pointer-coarse:max-w-none">
                 <IconButton label="Play next" size="sm" disabled={busy} onClick={() => controls.add(query, true)}>
                   <ArrowUpToLine size={16} />
                 </IconButton>

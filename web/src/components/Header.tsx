@@ -115,7 +115,8 @@ export function Header() {
   const guild = guilds.find((g) => g.id === guildId);
 
   return (
-    <header className="flex items-center gap-4 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-6 lg:px-8 lg:pt-6">
+    <header className="flex items-center gap-4 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-6 lg:grid lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-6 lg:px-8 lg:pb-4 lg:pt-6 xl:grid-cols-[minmax(0,1fr)_440px]">
+      {/* Desktop: same two columns as the content below, so search lines up with the side panel */}
       <ServerPicker />
       <div className="hidden min-w-0 flex-1 lg:block">
         <h1 className="truncate text-2xl font-bold tracking-tight">{guild?.name ?? "Mugetsu"}</h1>
@@ -148,7 +149,7 @@ export function Header() {
       >
         <SearchIcon size={19} />
       </button>
-      <div className="hidden w-full max-w-[480px] lg:block">
+      <div className="hidden w-full lg:block">
         <SearchBox />
       </div>
     </header>

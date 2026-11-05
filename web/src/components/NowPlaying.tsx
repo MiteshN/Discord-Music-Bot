@@ -27,7 +27,7 @@ import { Slider } from "./ui/Slider";
 function Badge({ icon: Icon, children, accent = false }: { icon: typeof Clock; children: string; accent?: boolean }) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
+      className={`inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 pt-px text-xs font-medium ${
         accent ? "bg-accent/18 text-accent-3" : "bg-panel-2 text-ink-2"
       }`}
     >
@@ -66,12 +66,12 @@ function TrackInfo({ player }: { player: PlayerState }) {
   const { name, by } = splitTitle(cur.title, cur.artist);
   const link = /^https?:\/\//.test(cur.url) ? cur.url : "";
   return (
-    <div className="mt-6 w-full text-center">
+    <div className="mt-6 w-full text-center short:mt-4">
       <p className="flex items-center justify-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-accent-3">
         <Eq paused={player.paused} />
         {player.paused ? "Paused" : "Now playing"}
       </p>
-      <h2 className="mt-2.5 text-balance text-[26px] font-bold leading-tight tracking-tight sm:text-[32px]">
+      <h2 className="mt-2.5 text-balance text-[26px] font-bold leading-tight tracking-tight sm:text-[32px] short:mt-1.5 short:text-2xl">
         {link ? (
           <a href={link} target="_blank" rel="noreferrer" className="group/link hover:underline decoration-ink-3 underline-offset-4">
             {name}
@@ -82,12 +82,12 @@ function TrackInfo({ player }: { player: PlayerState }) {
         )}
       </h2>
       {by && <p className="mt-1.5 truncate text-[17px] text-ink-2">{by}</p>}
-      <div className="mt-3.5 flex flex-wrap items-center justify-center gap-2">
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-panel-2 py-1 pl-1 pr-2.5 text-xs text-ink-2">
-          <Avatar src={cur.requester_avatar} name={cur.requester} size={18} />
+      <div className="mt-3.5 flex flex-wrap items-center justify-center gap-2 short:mt-2.5">
+        <span className="inline-flex h-7 items-center gap-1.5 rounded-full bg-panel-2 pl-1 pr-2.5 pt-px text-xs font-medium text-ink-2">
+          <Avatar src={cur.requester_avatar} name={cur.requester} size={20} />
           {cur.requester}
         </span>
-        <SourceBadge source={cur.source} />
+        <SourceBadge source={cur.source} variant="pill" />
         {player.effect && <Badge icon={Sparkles} accent>{player.effect.label}</Badge>}
         {player.loop !== "off" && <Badge icon={player.loop === "track" ? Repeat1 : Repeat}>{`Looping ${player.loop}`}</Badge>}
         {player.twenty_four_seven && <Badge icon={Clock}>24/7</Badge>}
@@ -106,7 +106,7 @@ function Progress({ player }: { player: PlayerState }) {
   const shown = preview ?? position;
 
   return (
-    <div className="mt-5 w-full">
+    <div className="mt-5 w-full short:mt-3">
       <Slider
         label="Seek"
         value={Math.floor(position)}
@@ -132,7 +132,7 @@ function Transport({ player }: { player: PlayerState }) {
   const LoopIcon = player.loop === "track" ? Repeat1 : Repeat;
 
   return (
-    <div className="mt-3 flex items-center justify-center gap-2 sm:gap-4">
+    <div className="mt-3 flex items-center justify-center gap-2 sm:gap-4 short:mt-1">
       <IconButton label={`Loop: ${player.loop} (L)`} active={player.loop !== "off"} onClick={controls.cycleLoop}>
         <LoopIcon size={20} />
       </IconButton>
@@ -200,7 +200,7 @@ function VolumeRow({ player }: { player: PlayerState }) {
   const Icon = volume === 0 ? VolumeX : volume < 50 ? Volume1 : Volume2;
 
   return (
-    <div className="mt-5 flex w-full items-center gap-3 rounded-2xl border border-line bg-panel px-3 py-2.5 sm:gap-4 sm:px-4">
+    <div className="@container mt-5 flex w-full items-center gap-3 rounded-2xl border border-line bg-panel px-3 py-2.5 sm:gap-4 sm:px-4 short:mt-3 short:py-2">
       <IconButton label="Mute (M)" size="sm" onClick={controls.toggleMute}>
         <Icon size={18} />
       </IconButton>
@@ -273,7 +273,7 @@ function EffectsMenu({ player }: { player: PlayerState }) {
         }`}
       >
         {busy ? <Spinner size={15} /> : <Sparkles size={15} />}
-        <span className="hidden max-w-24 truncate sm:block">{player.effect?.label ?? "Effects"}</span>
+        <span className="hidden max-w-24 truncate @md:block">{player.effect?.label ?? "Effects"}</span>
       </button>
       {open && (
         <div className="absolute bottom-full right-0 z-30 mb-2 w-[min(19rem,calc(100vw-2.5rem))] animate-pop rounded-2xl border border-line-2 bg-[#15141d]/95 p-3 shadow-[0_24px_60px_-15px_rgb(0_0_0/0.9)] backdrop-blur-2xl">
@@ -288,7 +288,7 @@ function EffectsMenu({ player }: { player: PlayerState }) {
                   disabled={!active || busy}
                   aria-pressed={on}
                   onClick={() => choose(e.key, e.label)}
-                  className={`rounded-full border px-3 py-1.5 text-[13px] font-medium transition-colors disabled:opacity-40 ${
+                  className={`inline-flex h-8 items-center rounded-full border px-3 text-[13px] leading-5 font-medium transition-colors disabled:opacity-40 ${
                     on
                       ? "border-accent/60 bg-accent/20 text-accent-3"
                       : "border-line bg-panel text-ink-2 hover:border-line-2 hover:bg-panel-2 hover:text-ink"
@@ -326,7 +326,7 @@ export function NowPlaying() {
   const cur = player.current;
   return (
     <section aria-label="Now playing" className="mx-auto flex w-full max-w-[560px] flex-col items-center">
-      <div className="relative w-full max-w-[min(360px,38vh)]">
+      <div className="relative w-full max-w-[min(360px,38vh)] short:max-w-[min(240px,24vh)]">
         {cur && (
           <Artwork
             src={cur.thumbnail}
