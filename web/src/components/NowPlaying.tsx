@@ -27,6 +27,11 @@ import { Avatar, Eq, IconButton, SourceBadge, Spinner } from "./ui/Buttons";
 import { Slider } from "./ui/Slider";
 
 const STOP_CONFIRM_MS = 4000;
+/**
+ * Some titles (radio stations especially) are a paragraph long. Past this many characters the title gets
+ * smaller and stops at two lines, and the artwork shrinks a little to make room, so the controls stay in view.
+ */
+const LONG_TITLE = 48;
 
 function Badge({ icon: Icon, children, accent = false }: { icon: typeof Clock; children: string; accent?: boolean }) {
   return (
@@ -69,13 +74,19 @@ function TrackInfo({ player }: { player: PlayerState }) {
 
   const { name, by } = splitTitle(cur.title, cur.artist);
   const link = /^https?:\/\//.test(cur.url) ? cur.url : "";
+  const long = name.length > LONG_TITLE;
   return (
     <div className="mt-6 w-full text-center short:mt-4">
       <p className="flex items-center justify-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-accent-3">
         <Eq paused={player.paused} />
         {player.paused ? "Paused" : "Now playing"}
       </p>
-      <h2 className="mt-2.5 text-balance text-[26px] font-bold leading-tight tracking-tight sm:text-[32px] short:mt-1.5 short:text-2xl">
+      <h2
+        title={name}
+        className={`mt-2.5 line-clamp-2 text-balance font-bold leading-tight tracking-tight short:mt-1.5 ${
+          long ? "text-[22px] sm:text-2xl short:text-xl" : "text-[26px] sm:text-[32px] short:text-2xl"
+        }`}
+      >
         {link ? (
           <a href={link} target="_blank" rel="noreferrer" className="group/link hover:underline decoration-ink-3 underline-offset-4">
             {name}
@@ -85,7 +96,11 @@ function TrackInfo({ player }: { player: PlayerState }) {
           name
         )}
       </h2>
-      {by && <p className="mt-1.5 truncate text-[17px] text-ink-2">{by}</p>}
+      {by && (
+        <p title={by} className="mt-1.5 truncate text-[17px] text-ink-2">
+          {by}
+        </p>
+      )}
       <div className="mt-3.5 flex flex-wrap items-center justify-center gap-2 short:mt-2.5">
         <span className="inline-flex h-7 items-center gap-1.5 rounded-full bg-panel-2 pl-1 pr-2.5 pt-px text-xs font-medium text-ink-2">
           <Avatar src={cur.requester_avatar} name={cur.requester} size={20} />
@@ -378,9 +393,14 @@ export function NowPlaying() {
   }
 
   const cur = player.current;
+  const long = !!cur && splitTitle(cur.title, cur.artist).name.length > LONG_TITLE;
   return (
     <section aria-label="Now playing" className="mx-auto flex w-full max-w-[560px] flex-col items-center">
-      <div className="relative w-full max-w-[min(360px,38vh)] short:max-w-[min(240px,24vh)]">
+      <div
+        className={`relative w-full ${
+          long ? "max-w-[min(330px,34vh)] short:max-w-[min(220px,21vh)]" : "max-w-[min(360px,38vh)] short:max-w-[min(240px,24vh)]"
+        }`}
+      >
         {cur && (
           <Artwork
             src={cur.thumbnail}
