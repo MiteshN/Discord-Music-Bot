@@ -34,7 +34,10 @@ CATALOG = [
     ("Rin Takahara", "Tokyo Rain", 247), ("Marrow", "Hearts in Monochrome", 183),
     ("Polar Bloom", "Wildfire", 256), ("Saint Juno", "Gold Coast Drive", 208),
 ]
-STATIONS = ["Lofi Hours", "Night Jazz FM", "Tokyo Beats", "Ambient Drift", "Synthwave City", "Morning Acoustic"]
+STATIONS = ["Lofi Hours", "Night Jazz FM", "Tokyo Beats", "Ambient Drift", "Synthwave City", "Morning Acoustic",
+            # Real stations often stuff their names with keywords; this one keeps long titles honest in the UI
+            "-- # TOP 100 HITS --- DJ MIXES -- Pop, Rock, Dance, House, Techno, Trance, Electro, Hip-Hop, Rap, "
+            "RnB, Reggaeton, Latin, Jazz, Blues, Soul, Funk, Chillout, Lounge, Ambient, 80s, 90s, EDM, Workout"]
 LINES = [
     "Streetlights hum a song I almost know", "We keep the windows open to the night",
     "Every road out here is paved with static", "Hold on, the city's waking up again",
