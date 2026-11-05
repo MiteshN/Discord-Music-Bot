@@ -200,18 +200,26 @@ export function PlaylistsPanel() {
               setCode("");
             }
           }}
-          className="flex gap-1.5"
+          className="relative"
         >
           <input
             value={code}
             onChange={(e) => setCode(e.target.value.toUpperCase())}
             placeholder="Got a share code? Paste it to play"
             maxLength={8}
-            className="h-9 min-w-0 flex-1 rounded-xl border border-line bg-panel px-3 text-sm uppercase tracking-wider outline-none placeholder:normal-case placeholder:tracking-normal placeholder:text-ink-3 focus:border-accent/60"
+            aria-label="Share code"
+            className="h-9 w-full rounded-xl border border-line bg-panel pl-3 pr-10 text-sm uppercase tracking-wider outline-none placeholder:normal-case placeholder:tracking-normal placeholder:text-ink-3 focus:border-accent/60"
           />
-          <IconButton label="Play shared playlist" size="sm" type="submit" disabled={code.trim().length !== 8}>
-            <Play size={15} fill="currentColor" />
-          </IconButton>
+          {/* Inside the field, so this row lines up with the save button above */}
+          <button
+            type="submit"
+            disabled={code.trim().length !== 8}
+            aria-label="Play shared playlist"
+            title="Play shared playlist"
+            className="absolute right-1 top-1 grid size-7 place-items-center rounded-lg bg-accent text-white transition-colors hover:bg-accent-2 disabled:bg-transparent disabled:text-ink-3"
+          >
+            <Play size={13} fill="currentColor" className="translate-x-px" />
+          </button>
         </form>
       </div>
       {playlists === null ? (
@@ -224,7 +232,7 @@ export function PlaylistsPanel() {
             <Library size={24} />
           </span>
           <p className="text-[15px] font-medium text-ink-2">No playlists yet</p>
-          <p className="text-sm">Save the queue above, or tap ♥ › Add to playlist on any song. They work in every server.</p>
+          <p className="text-sm">Save the queue above, or use the add-to-playlist button under the song that's playing. They work in every server.</p>
         </div>
       ) : (
         <ul className="scrollbar-thin min-h-0 flex-1 space-y-2 overflow-y-auto px-3 pb-4">
