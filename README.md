@@ -1,141 +1,63 @@
-# Discord Music Bot
+# Mugetsu
 
-A feature-rich Discord music bot built with Python that supports YouTube, Spotify, and SoundCloud playback.
+A Discord music bot with a real-time web dashboard. Plays YouTube, Spotify, SoundCloud and more, with original-quality audio, instant track changes, synced lyrics and audio effects.
 
 ## Features
 
-- **Multi-platform support** — Play from YouTube, Spotify, SoundCloud, and more
-- **Original-quality audio** — YouTube's Opus audio is passed straight through to Discord without re-encoding when no effect is active and volume is 100%
-- **Instant starts** — The next track is resolved and cached while the current one plays; cached tracks start with no network round-trip
-- **Stutter-resistant** — yt-dlp runs in separate worker processes so it never competes with the audio thread, and cached tracks play from disk
-- **Queue management** — Add, remove, move, shuffle, clear, loop, and go back to previous tracks
-- **Playback controls** — Play, pause, resume, skip, previous, seek, and volume, with near-seamless restarts for seek/volume/effects
-- **Spotify integration** — Tracks, playlists (no 100-track limit), and albums, matched to official audio on YouTube Music
-- **YouTube playlists** — Queue entire playlists at once (mix/radio links play just the linked video)
-- **Audio effects** — Nightcore, vaporwave, bass boost, speed, tremolo, vibrato, and 8D via FFmpeg
-- **Search** — Search YouTube and pick from the top results with a dropdown menu
-- **Lyrics** — From [LRCLIB](https://lrclib.net) (no key needed), with Genius as an optional fallback
-- **Now playing** — Track card with playback buttons, an up-next preview, and a live progress bar in `/nowplaying`
-- **24/7 mode** — Keep the bot in the voice channel indefinitely
-- **DJ role** — Restrict destructive commands to users with a "DJ" role
-- **Vote skip** — Majority vote to skip when 3+ people are listening (DJs and the song's requester skip instantly)
-- **Audio caching** — Tracks are cached to disk in the background for instant, network-free replays, with LRU eviction
-- **Auto-disconnect** — Leaves after 10 minutes idle, or 3 minutes after everyone leaves the channel
-- **Voice channel status** — Displays the current track in the voice channel status
-- **Slash commands** — All commands work as both `!prefix` and `/slash` commands, with autocomplete for `/play`
-- **Web dashboard** — Real-time browser control panel with live artwork, drag-and-drop queue, and search (optional, requires Discord OAuth2 setup)
+- **Original-quality audio**: YouTube's Opus audio goes to Discord untouched when no effect is on and volume is 100%. Anything else is re-encoded once by FFmpeg, at your channel's bitrate.
+- **Instant starts**: the next song is resolved and cached while the current one plays. Cached songs start with no network round-trip.
+- **Stutter-resistant**: yt-dlp runs in separate worker processes, so it never competes with the audio thread.
+- **Spotify**: tracks, albums and playlists (no 100-track limit), matched to official audio on YouTube Music.
+- **YouTube playlists**, search with a picker, and `/play` autocomplete from YouTube and Spotify.
+- **Queue control**: add, play next, skip to, remove, move, shuffle, clear, loop (track or queue), previous.
+- **Effects**: nightcore, vaporwave, bass boost, 8D, tremolo, vibrato and speed.
+- **Lyrics** from [LRCLIB](https://lrclib.net) (no key needed), time-synced in the dashboard. Genius is an optional fallback.
+- **Fair by default**: a **DJ** role (if you create one) guards destructive actions; everyone else votes to skip when 3+ people are listening.
+- **24/7 mode**, auto-leave when idle or alone, and the current song in the voice channel status.
+- **Web dashboard** (optional): sign in with Discord, control playback, drag to reorder the queue, search, follow synced lyrics, and see what everyone else is doing, live.
 
 ## Commands
 
-| Command | Description |
-|---------|-------------|
-| `!play <url/search>` | Play a song or add it to the queue (alias: `!p`) |
-| `!playtop <url/search>` | Add a song to the top of the queue (alias: `!pt`) |
-| `!search <query>` | Search YouTube and pick a result |
-| `!skip` | Skip the current track (vote skip with 3+ listeners) |
-| `!previous` | Go back to the previous track (aliases: `!back`, `!prev`) |
-| `!pause` / `!resume` | Pause or resume playback |
-| `!seek <timestamp>` | Jump to a position (e.g. `!seek 1:30`) |
-| `!stop` | Clear the queue and disconnect |
-| `!disconnect` | Disconnect from the voice channel (aliases: `!dc`, `!leave`) |
-| `!queue [page]` | Show the queue (alias: `!q`) |
-| `!nowplaying` | Show the current track with a progress bar (alias: `!np`) |
-| `!volume [0-100]` | Show or set the volume. 100 gives the best quality |
-| `!loop [off/track/queue]` | Set loop mode, or cycle it with no argument |
-| `!shuffle` | Randomize the queue |
-| `!remove <position>` | Remove a song from the queue |
-| `!move <from> <to>` | Move a song to a different position |
-| `!clear` | Clear the queue but keep the current song playing |
-| `!lyrics` | Show lyrics for the current track |
-| `!247` | Toggle 24/7 mode (stay in voice channel) |
-| `!nightcore` | Nightcore effect (speed up + pitch up) |
-| `!vaporwave` | Vaporwave effect (slow down + pitch down) |
-| `!bassboost` | Boost bass frequencies |
-| `!speed <0.5-2.0>` | Change playback speed without pitch change |
-| `!tremolo` | Tremolo effect (volume oscillation) |
-| `!vibrato` | Vibrato effect (pitch oscillation) |
-| `!8d` | 8D audio effect (stereo rotation) |
-| `!cleareffect` | Remove all audio effects |
-| `!cachestats` | Show audio cache statistics (files, size, hit rate) |
-| `!clearcache` | Clear all cached audio files (DJ role) |
+Every command works as a slash command and with the `!` prefix.
 
-Playback controls (`skip`, `pause`, `seek`, effects, and so on) require you to be in the bot's voice channel.
+| Command | What it does |
+|---|---|
+| `/play <song or link>` | Play or queue a song, album or playlist (`!p`) |
+| `/playtop <song or link>` | Queue it to play next (`!pt`) |
+| `/search <query>` | Search YouTube and pick a result |
+| `/join` | Bring the bot into your voice channel |
+| `/skip` | Skip, or vote to skip (`!s`) |
+| `/skipto <position>` | Jump to a song in the queue |
+| `/previous` | Go back to the last song (`!back`) |
+| `/pause` · `/resume` | Pause or resume |
+| `/seek <1:30>` · `/replay` | Jump to a time, or start the song over |
+| `/stop` · `/disconnect` | Clear the queue and leave (`!dc`) |
+| `/queue [page]` | Show the queue (`!q`) |
+| `/nowplaying` | The current song with a progress bar (`!np`) |
+| `/volume [0-100]` | Show or set the volume. 100 gives the best quality |
+| `/loop [off/track/queue]` | Set the loop mode, or cycle it |
+| `/shuffle` · `/clear` | Shuffle or clear the queue |
+| `/remove <position>` · `/move <from> <to>` | Edit the queue |
+| `/lyrics` | Lyrics for the current song |
+| `/nightcore` `/vaporwave` `/bassboost` `/8d` `/tremolo` `/vibrato` | Effects |
+| `/speed <0.5-2.0>` · `/cleareffect` | Change speed, or remove effects |
+| `/247` | Stay in the voice channel even when idle |
+| `/dashboard` · `/help` | Dashboard link, and the full command list |
+| `/cachestats` · `/clearcache` | Audio cache info, or empty it |
 
-## Setup
+Playback controls (skip, pause, seek, effects...) need you to be in the bot's voice channel.
 
-### Prerequisites
+**DJ role:** if a role named `DJ` exists (change it with `DJ_ROLE_NAME`), only DJs and admins can stop, clear, shuffle, remove, move, skip to, change the volume, toggle 24/7 and clear the cache. Without that role, anyone can. DJs, admins and whoever requested the current song always skip instantly. These rules apply to the dashboard too.
 
-- Python 3.10+
-- ffmpeg
-- [Deno](https://deno.com): yt-dlp needs a JavaScript runtime for full YouTube support (the Docker image includes it)
+## Running it
 
-```bash
-sudo apt install ffmpeg
-curl -fsSL https://deno.land/install.sh | sh
-```
-
-### Installation
-
-1. Clone the repository:
-
-```bash
-git clone https://github.com/MiteshN/Discord-Music-Bot.git
-cd Discord-Music-Bot
-```
-
-2. Create a virtual environment and install dependencies:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-3. Copy `.env.example` to `.env` and fill in your tokens:
-
-```bash
-cp .env.example .env
-```
-
-### Getting Your Tokens
-
-**Discord Bot Token:**
-1. Go to the [Discord Developer Portal](https://discord.com/developers/applications)
-2. Create a new application and go to the **Bot** tab
-3. Click **Reset Token** and copy it
-4. Enable **Message Content Intent** under Privileged Gateway Intents
-5. Under **OAuth2 > URL Generator**, select the following scopes and permissions, then use the generated URL to invite the bot:
-
-**Scopes:** `bot`, `applications.commands`
-
-**Permissions:**
-- Text: `View Channels`, `Send Messages`, `Send Messages in Threads`, `Embed Links`, `Read Message History`
-- Voice: `Connect`, `Speak`, `Manage Channels` (required for voice channel status)
-
-**Spotify Credentials (optional):**
-1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
-2. Create an app and copy the **Client ID** and **Client Secret**
-
-**Genius API Token (optional, lyrics fallback):**
-1. Go to [Genius API Clients](https://genius.com/api-clients)
-2. Create a new API client and generate an access token
-
-### Running
-
-```bash
-source .venv/bin/activate
-python bot.py
-```
-
-### Docker
-
-**Docker Compose:**
+### Docker (recommended)
 
 ```yaml
 services:
   bot:
     image: ghcr.io/miteshn/discord-music-bot:latest
-    restart: always
+    restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:
@@ -144,91 +66,103 @@ services:
       - DISCORD_BOT_TOKEN=
       - SPOTIFY_CLIENT_ID=
       - SPOTIFY_CLIENT_SECRET=
-      - GENIUS_API_TOKEN=
-      # - CACHE_LIMIT_MB=2048
-      # - MAX_CACHE_DURATION=1800
-      # Web Dashboard (optional)
       - DISCORD_CLIENT_ID=
       - DISCORD_CLIENT_SECRET=
       - DASHBOARD_SECRET_KEY=
-      - DASHBOARD_URL=http://localhost:8080  # change to http://<your-server-ip>:8080 for remote access
-      # - DASHBOARD_PORT=8080
+      - DASHBOARD_URL=http://localhost:8080
 ```
-
-Fill in your tokens after the `=` signs, then:
 
 ```bash
-docker compose up -d             # start in background
-docker compose logs -f           # view logs
-docker compose down              # stop the bot
-docker compose up -d --build     # rebuild after code changes
+docker compose up -d
 ```
 
-## Audio Quality & Caching
+The `/app/cache` volume keeps the audio cache and per-server settings (volume, 24/7) across updates. To update, pull the new image and recreate the container (`docker compose pull && docker compose up -d`). A plain restart keeps the old image.
 
-- **Passthrough:** YouTube serves Opus, the same codec Discord uses. When volume is 100% and no effect is active, the original packets go to Discord untouched. Changing the volume or adding an effect makes FFmpeg re-encode once, at your voice channel's bitrate (minimum 128 kbps). For the best quality, leave the bot at 100% and adjust it per-user in Discord (right-click the bot, then User Volume).
-- **Stream first, cache in the background:** A track's first play starts streaming immediately while a copy downloads to the cache. Later plays read from disk: instant start, no network hiccups.
-- **Prefetch:** While a song plays, the next one is resolved and cached, so the transition is instant.
+### From source
 
-Livestreams and tracks longer than `MAX_CACHE_DURATION` are always streamed. When the cache exceeds its size limit, the least recently played files are evicted.
+You need Python 3.11+, FFmpeg, and [Deno](https://deno.com) (yt-dlp uses it for full YouTube support). The dashboard also needs Node.js 20.19+ to build.
 
-| Environment Variable | Default | Description |
+```bash
+git clone https://github.com/MiteshN/Discord-Music-Bot.git
+cd Discord-Music-Bot
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env                                # then fill it in
+(cd web && npm ci && npm run build)                 # only if you want the dashboard
+python -m mugetsu
+```
+
+### Getting your tokens
+
+**Discord bot** ([Developer Portal](https://discord.com/developers/applications)):
+1. Create an application, open **Bot**, and copy the token (**Reset Token**).
+2. Turn on **Message Content Intent** (for `!` commands).
+3. Invite it from **OAuth2 > URL Generator** with scopes `bot` and `applications.commands`, and permissions: View Channels, Send Messages, Send Messages in Threads, Embed Links, Read Message History, Connect, Speak, and Manage Channels (for the voice channel status).
+
+**Spotify** (optional): create an app in the [Spotify dashboard](https://developer.spotify.com/dashboard) and copy its client ID and secret.
+
+**Genius** (optional lyrics fallback): create a client at [genius.com/api-clients](https://genius.com/api-clients) and generate an access token.
+
+## Web dashboard
+
+1. In the Developer Portal, open your application's **OAuth2** page and copy the **Client ID** and **Client Secret**.
+2. Under **Redirects**, add `<DASHBOARD_URL>/callback` (for example `http://localhost:8080/callback`).
+3. Set `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DASHBOARD_SECRET_KEY` (any long random string) and `DASHBOARD_URL`, then restart.
+
+For other devices on your network, set `DASHBOARD_URL` to `http://<server-ip>:8080`, register that `/callback` URL too, and make sure port 8080 is reachable. Behind HTTPS (a reverse proxy or tunnel), use the `https://` address: cookies are then marked secure automatically.
+
+Adding a song from the dashboard makes the bot join your voice channel if you're in one. Keyboard shortcuts: `Space` play/pause, `Shift+→` skip, `Shift+←` previous, `M` mute, `L` loop, `/` or `Ctrl+K` search.
+
+## Configuration
+
+| Variable | Default | |
 |---|---|---|
-| `CACHE_LIMIT_MB` | `2048` | Maximum cache size in MB (`0` disables caching) |
-| `MAX_CACHE_DURATION` | `1800` | Max track duration (seconds) to cache |
+| `DISCORD_BOT_TOKEN` | | Required |
+| `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` | | Spotify links and search |
+| `GENIUS_API_TOKEN` | | Lyrics fallback |
+| `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` | | Turn on the dashboard |
+| `DASHBOARD_SECRET_KEY` | random | Signs session cookies; set it so restarts don't sign everyone out |
+| `DASHBOARD_URL` | `http://localhost:8080` | Public address; must match the OAuth redirect |
+| `DASHBOARD_PORT` / `DASHBOARD_HOST` | `8080` / `0.0.0.0` | Where the dashboard listens |
+| `COMMAND_PREFIX` | `!` | Prefix for text commands |
+| `DJ_ROLE_NAME` | `DJ` | Role that guards destructive actions |
+| `CACHE_DIR` | `cache` | Audio cache and settings database |
+| `CACHE_LIMIT_MB` | `2048` | Cache size; `0` turns caching off |
+| `MAX_CACHE_DURATION` | `1800` | Longest track (seconds) worth caching |
+| `IDLE_TIMEOUT` / `ALONE_TIMEOUT` | `600` / `180` | Seconds before leaving when idle / alone |
+| `LOG_LEVEL` | `INFO` | `DEBUG` for more detail |
 
-The volume mount (`./cache:/app/cache`) in Docker Compose persists the cache and per-server settings (volume, 24/7) across container restarts.
+**How audio works:** a song's first play streams immediately while a copy downloads to the cache. Later plays read from disk. Livestreams and tracks longer than `MAX_CACHE_DURATION` always stream. When the cache is full, the least recently played files go first. For the best quality, leave the bot at 100% and adjust volume per person in Discord (right-click the bot, then User Volume).
 
-## DJ Role
+## Development
 
-If a role named **DJ** exists in your server, only users with that role (or admins) can use: `stop`, `disconnect`, `volume`, `remove`, `move`, `clear`, `shuffle`, `247`, `clearcache`. If no DJ role exists, these are unrestricted.
+```
+mugetsu/
+  player/     the playback engine, queue and permissions, shared by commands and the dashboard
+  media/      yt-dlp, Spotify, lyrics, the audio cache, FFmpeg
+  cogs/       Discord commands
+  ui/         embeds, buttons, the now-playing message
+  web/        the dashboard's API, WebSocket and Discord sign-in
+web/          the dashboard (React, TypeScript, Vite, Tailwind)
+tests/        pytest suite, with fake voice clients for the engine
+```
 
-Skipping works the same either way: DJs, admins, and whoever requested the current song skip instantly; with 3+ listeners, everyone else votes (majority wins).
+```bash
+pip install -r requirements-dev.txt
+ruff check mugetsu tests && pytest       # bot
+cd web && npm run lint && npm test       # dashboard
+```
 
-## Web Dashboard
+To work on the dashboard without Discord, run the demo backend (made-up songs, no sign-in needed) and the Vite dev server:
 
-The bot includes an optional web dashboard for controlling music playback from the browser. It runs in-process alongside the bot and provides real-time updates via WebSocket.
+```bash
+python -m mugetsu.web.demo     # API on :8080
+cd web && npm run dev          # open http://localhost:5173
+```
 
-### Dashboard Setup
+`npm run dev` can also point at a real bot: run the bot with `DASHBOARD_URL=http://localhost:5173` and add `http://localhost:5173/callback` as a redirect.
 
-1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) and select your bot's application
-2. Go to **OAuth2** and copy the **Client ID** and **Client Secret**
-3. Under **Redirects**, add your dashboard callback URL (e.g. `http://localhost:8080/callback`)
-4. Set the environment variables:
-
-| Variable | Required | Description |
-|---|---|---|
-| `DISCORD_CLIENT_ID` | Yes | Bot's OAuth2 client ID |
-| `DISCORD_CLIENT_SECRET` | Yes | OAuth2 client secret |
-| `DASHBOARD_SECRET_KEY` | Recommended | Random string for session signing (regenerated on restart if unset) |
-| `DASHBOARD_URL` | For production | Public base URL (default: `http://localhost:8080`) — must match the redirect URI host |
-| `DASHBOARD_PORT` | No | Web server port (default: `8080`) |
-
-5. Restart the bot — the dashboard will be available at `http://localhost:8080`
-
-### Dashboard Features
-
-- Login with Discord OAuth2; sessions last 30 days
-- Discord-style server rail showing which servers are playing
-- Now-playing view with large artwork and an ambient background that follows the current song
-- Play/pause, skip, previous, stop, seek, volume, loop, and 24/7 mode
-- One-click effect chips (bass boost, nightcore, vaporwave, 8D, speed, and more)
-- Search with live results and keyboard navigation; add to the end or play next
-- Queue: drag-and-drop reorder, play next, remove, shuffle, clear
-- Real-time sync across tabs, devices, and Discord commands
-- Keyboard shortcuts: `Space` play/pause, `Shift+→` skip, `Shift+←` previous, `/` search
-- Responsive: works on desktop, tablet, and mobile
-
-If you're in a voice channel, adding a song from the dashboard makes the bot join you. Otherwise the bot must already be in a voice channel.
-
-### Remote Access
-
-If running on a server and accessing from another device on your network:
-
-1. Set `DASHBOARD_URL` to `http://<server-ip>:8080` (e.g. `http://192.168.1.11:8080`)
-2. Add `http://<server-ip>:8080/callback` as an OAuth2 redirect URI in the [Discord Developer Portal](https://discord.com/developers/applications)
-3. Ensure port `8080` is open on the server's firewall
-4. The `ports: "8080:8080"` mapping in `docker-compose.yml` is required for Docker
+CI runs both test suites on every push, and publishes `ghcr.io/miteshn/discord-music-bot:latest` from `master` once they pass.
 
 ## License
 

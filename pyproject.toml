@@ -1,0 +1,37 @@
+[project]
+name = "mugetsu"
+version = "2.0.0"
+description = "Discord music bot with a real-time web dashboard"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["web"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "ASYNC", "RUF"]
+ignore = [
+    "E501",    # long lines are fine when they read better
+    "B008",
+    "RUF001",  # we use typographic quotes and dashes in user-facing text on purpose
+    "RUF002",
+    "RUF003",
+    "RUF012",
+    "ASYNC109",
+    "ASYNC240",  # local stat() calls on cache files are microseconds
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["mugetsu"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore::DeprecationWarning:audioop",
+    "ignore:.*passed as positional argument:DeprecationWarning",
+]

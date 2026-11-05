@@ -1,6 +1,15 @@
-# yt-dlp needs a JavaScript runtime to get YouTube's full set of audio formats
+# --- Build the React dashboard ---
+FROM node:24-alpine AS web
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY web/ ./
+RUN npm run build
+
+# --- yt-dlp needs a JavaScript runtime to get YouTube's full set of audio formats ---
 FROM denoland/deno:bin AS deno
 
+# --- The bot ---
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -19,9 +28,15 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-COPY . .
+COPY mugetsu/ ./mugetsu/
+COPY bot.py ./
+COPY --from=web /web/dist ./web/dist
 
+# Cache and per-server settings live in /app/cache: mount it to keep them across updates
 EXPOSE 8080
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD ["python", "-m", "mugetsu.healthcheck"]
+
 ENTRYPOINT ["tini", "--"]
-CMD ["python", "bot.py"]
+CMD ["python", "-m", "mugetsu"]
