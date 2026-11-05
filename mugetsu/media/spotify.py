@@ -86,6 +86,22 @@ class SpotifyResolver:
                 })
         return {"songs": songs[:tracks], "albums": found_albums[:albums]}
 
+    def search_tracks(self, query: str, limit: int = 50, offset: int = 0) -> list[dict]:
+        """Tracks matching a Spotify search (supports genre:"rock" and year:1980-1989). Blocking."""
+        if not self.sp:
+            return []
+        try:
+            results = self.sp.search(query, type="track", limit=limit, offset=offset)
+        except spotipy.SpotifyException as e:
+            if limit <= 10 or e.http_status != 400:
+                raise
+            results = self.sp.search(query, type="track", limit=10, offset=offset)  # newer apps cap the limit
+        return [
+            {**_track_info(t), "popularity": t.get("popularity") or 0}
+            for t in (results.get("tracks") or {}).get("items") or []
+            if t and t.get("id")
+        ]
+
     def resolve(self, url: str) -> tuple[str, list[dict]]:
         """Return (collection name, tracks). Blocking; run in a thread."""
         match = SPOTIFY_URL_RE.match(url)

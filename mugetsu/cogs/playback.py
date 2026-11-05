@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Literal
 
 import aiohttp
@@ -15,10 +16,24 @@ from mugetsu.media.lyrics import split_lyrics
 from mugetsu.player.manager import URL_RE, Requester
 from mugetsu.player.models import PlayerError
 from mugetsu.ui import embeds
-from mugetsu.ui.views import SearchSelectView
+from mugetsu.ui.views import RadioSelectView, SearchSelectView, send_song_dm
 from mugetsu.util import parse_timestamp
 
 log = logging.getLogger("mugetsu.cogs.playback")
+
+
+def no_peeking(player):
+    if player.game is not None:
+        raise PlayerError("No peeking during guess the song! 🙈")
+
+
+def parse_radio_query(query: str) -> tuple[str, str]:
+    """Split "lofi --country=japan" (or "country:japan") into ("lofi", "japan")."""
+    match = re.search(r"(?:--country=|country:)(\"[^\"]+\"|\S+)", query)
+    if not match:
+        return query.strip(), ""
+    country = match.group(1).strip('"')
+    return (query[:match.start()] + query[match.end():]).strip(), country
 
 
 class Playback(MusicCog):
@@ -177,6 +192,7 @@ class Playback(MusicCog):
     @commands.hybrid_command(name="nowplaying", aliases=["np"], description="Show the current track")
     async def nowplaying(self, ctx: commands.Context):
         player = self.player(ctx)
+        no_peeking(player)
         if not player.current:
             raise PlayerError("Nothing is playing.")
         await ctx.send(embed=embeds.now_playing(player, progress=True))
@@ -184,6 +200,7 @@ class Playback(MusicCog):
     @commands.hybrid_command(name="lyrics", description="Show lyrics for the current track")
     async def lyrics(self, ctx: commands.Context):
         player = self.player(ctx)
+        no_peeking(player)
         song = player.current
         if not song:
             raise PlayerError("Nothing is playing.")
@@ -197,6 +214,51 @@ class Playback(MusicCog):
             embed = discord.Embed(title=heading, description=chunk, color=embeds.ACCENT)
             embed.set_footer(text=f"Source: {found.source}")
             await ctx.send(embed=embed)
+
+    @commands.hybrid_command(name="save", aliases=["like", "heart"], description="Send the current song to your DMs")
+    async def save(self, ctx: commands.Context):
+        player = self.player(ctx)
+        no_peeking(player)
+        await ctx.send(await send_song_dm(ctx.author, player.current, ctx.guild.name), ephemeral=True)
+
+    @commands.hybrid_command(name="autoplay", aliases=["ap"], description="Keep playing similar songs when the queue runs out")
+    @app_commands.describe(mode="on or off. Leave empty to toggle")
+    async def autoplay(self, ctx: commands.Context, mode: Literal["on", "off"] | None = None):
+        player = self.player(ctx)
+        enabled = (not player.autoplay) if mode is None else mode == "on"
+        await ctx.send(await player.set_autoplay(enabled, ctx.author))
+
+    @commands.hybrid_command(name="playrecent", aliases=["pr", "recent"], description="Queue the songs you requested most recently")
+    @app_commands.describe(count="How many songs (1-50)")
+    async def playrecent(self, ctx: commands.Context, count: app_commands.Range[int, 1, 50] = 10):
+        await ctx.defer()
+        songs = await self.players.recent_songs(ctx.guild.id, ctx.author, count)
+        if not songs:
+            raise PlayerError("You haven't requested anything here yet.")
+        await self.players.join(ctx.author)
+        await self.announcer.enqueue_and_reply(
+            self.player(ctx), songs, "your recent songs", channel_id=ctx.channel.id, send=ctx.send, actor=ctx.author
+        )
+
+    @commands.hybrid_command(name="radio", description="Play an internet radio station (e.g. lofi, jazz, a station name)")
+    @app_commands.describe(query="Station name or genre. Add --country=japan to filter by country")
+    async def radio(self, ctx: commands.Context, *, query: str = ""):
+        await ctx.defer()
+        name, country = parse_radio_query(query)
+        try:
+            stations = await self.players.radio.search(name, country, limit=6)
+        except Exception as e:
+            raise PlayerError(f"Couldn't reach the radio directory: {e}") from e
+        if not stations:
+            raise PlayerError("No stations found. Try another name, genre or country.")
+        await self.players.join(ctx.author)
+        player = self.player(ctx)
+        song = self.players.station_song(stations[0], Requester.of(ctx.author))
+        await self.announcer.enqueue_and_reply(player, [song], "", channel_id=ctx.channel.id, send=ctx.send,
+                                               actor=ctx.author)
+        if len(stations) > 1:
+            view = RadioSelectView(self.bot, ctx.author, stations[1:])
+            view.message = await ctx.send("Not the one? Pick another station:", view=view)
 
     # --- Events ---
 

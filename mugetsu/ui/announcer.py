@@ -11,6 +11,7 @@ from mugetsu.player.manager import PlayerHooks
 from mugetsu.player.models import PlayerError, Song
 from mugetsu.ui import embeds
 from mugetsu.ui.views import NowPlayingView
+from mugetsu.util import format_duration
 
 if TYPE_CHECKING:
     from mugetsu.bot import MugetsuBot
@@ -47,6 +48,11 @@ class Announcer(PlayerHooks):
 
     async def track_cleared(self, player: GuildPlayer):
         await self.retire(player.guild_id)
+
+    async def resumed(self, player: GuildPlayer, song: Song, position: float):
+        at = f" at {format_duration(position)}" if position >= 5 else ""
+        await self.notice(player, f"♻️ Back after a restart. Picking up **{discord.utils.escape_markdown(song.title)}**{at}.")
+        await self.announce(player)
 
     async def announce(self, player: GuildPlayer, send=None):
         await self.retire(player.guild_id)

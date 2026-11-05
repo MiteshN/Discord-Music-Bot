@@ -20,6 +20,8 @@ import { controls } from "../lib/controls";
 import { formatTime, splitTitle } from "../lib/format";
 import { useStore } from "../store";
 import type { PlayerState } from "../types";
+import { GameCard } from "./GameCard";
+import { SongActions } from "./SongActions";
 import { Artwork } from "./ui/Artwork";
 import { Avatar, Eq, IconButton, SourceBadge, Spinner } from "./ui/Buttons";
 import { Slider } from "./ui/Slider";
@@ -92,6 +94,7 @@ function TrackInfo({ player }: { player: PlayerState }) {
         {player.loop !== "off" && <Badge icon={player.loop === "track" ? Repeat1 : Repeat}>{`Looping ${player.loop}`}</Badge>}
         {player.twenty_four_seven && <Badge icon={Clock}>24/7</Badge>}
         {cur.live && <Badge icon={Radio}>Live</Badge>}
+        <SongActions />
       </div>
     </div>
   );
@@ -320,6 +323,17 @@ export function NowPlaying() {
         <div className="mt-8 h-4 w-28 animate-pulse rounded bg-panel-2" />
         <div className="mt-4 h-8 w-64 animate-pulse rounded bg-panel-2" />
       </div>
+    );
+  }
+
+  if (player.game) {
+    return (
+      <>
+        <GameCard game={player.game} />
+        <div className="mx-auto w-full max-w-[560px]">
+          <VolumeRow player={player} />
+        </div>
+      </>
     );
   }
 

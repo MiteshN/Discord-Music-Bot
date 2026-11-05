@@ -94,6 +94,8 @@ const SOURCE_STYLES: Record<string, { label: string; className: string }> = {
   youtube: { label: "YouTube", className: "text-youtube bg-youtube/10" },
   soundcloud: { label: "SoundCloud", className: "text-soundcloud bg-soundcloud/10" },
   bandcamp: { label: "Bandcamp", className: "text-sky-300 bg-sky-300/10" },
+  radio: { label: "Radio", className: "text-amber-300 bg-amber-300/10" },
+  game: { label: "Game", className: "text-accent-3 bg-accent/15" },
   web: { label: "Web", className: "text-ink-2 bg-panel-3" },
 };
 

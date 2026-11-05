@@ -1,4 +1,4 @@
-import { Check, ChevronDown, LogOut, Search as SearchIcon, Volume2 } from "lucide-react";
+import { ChartColumnBig, Check, ChevronDown, LogOut, Search as SearchIcon, Volume2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import type { Listener } from "../types";
@@ -112,6 +112,7 @@ export function Header() {
   const guildId = useStore((s) => s.guildId);
   const player = useStore((s) => s.player);
   const setSearchOpen = useStore((s) => s.setSearchOpen);
+  const setStatsOpen = useStore((s) => s.setStatsOpen);
   const guild = guilds.find((g) => g.id === guildId);
 
   return (
@@ -119,7 +120,18 @@ export function Header() {
       {/* Desktop: same two columns as the content below, so search lines up with the side panel */}
       <ServerPicker />
       <div className="hidden min-w-0 flex-1 lg:block">
-        <h1 className="truncate text-2xl font-bold tracking-tight">{guild?.name ?? "Mugetsu"}</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="min-w-0 truncate text-2xl font-bold tracking-tight">{guild?.name ?? "Mugetsu"}</h1>
+          {guild && (
+            <button
+              type="button"
+              onClick={() => setStatsOpen(true)}
+              className="ml-auto flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold text-ink-2 transition-colors hover:bg-panel-3 hover:text-ink"
+            >
+              <ChartColumnBig size={16} /> Stats
+            </button>
+          )}
+        </div>
         {guild && (
           <div className="mt-1 flex items-center gap-3 text-sm text-ink-2">
             <ConnectionDot />
@@ -140,6 +152,15 @@ export function Header() {
       <div className="lg:hidden">
         <ConnectionDot />
       </div>
+      <button
+        type="button"
+        onClick={() => setStatsOpen(true)}
+        disabled={!guildId}
+        aria-label="Server stats"
+        className="grid size-10 place-items-center rounded-xl bg-panel-2 text-ink-2 disabled:opacity-40 lg:hidden"
+      >
+        <ChartColumnBig size={19} />
+      </button>
       <button
         type="button"
         onClick={() => setSearchOpen(true)}

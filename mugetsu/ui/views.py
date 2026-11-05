@@ -15,6 +15,19 @@ if TYPE_CHECKING:
 NUMBERS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣"]
 
 
+async def send_song_dm(user: discord.abc.User, song: Song | None, guild_name: str) -> str:
+    """♥: send a song to someone's DMs so they can find it later."""
+    if song is None:
+        raise PlayerError("Nothing is playing.")
+    try:
+        await user.send(embed=embeds.saved_song(song, guild_name))
+    except discord.Forbidden:
+        raise PlayerError("I couldn't DM you. Allow DMs from server members, then try again.") from None
+    except discord.HTTPException as e:
+        raise PlayerError(f"Couldn't send that: {e}") from None
+    return "❤️ Sent to your DMs."
+
+
 class NowPlayingView(discord.ui.View):
     """Playback buttons under the now-playing message."""
 
@@ -74,6 +87,15 @@ class NowPlayingView(discord.ui.View):
     async def queue_button(self, interaction: discord.Interaction, _):
         await interaction.response.send_message(embed=embeds.queue_page(self.player), ephemeral=True)
 
+    @discord.ui.button(emoji="❤️", style=discord.ButtonStyle.secondary, row=1)
+    async def save_button(self, interaction: discord.Interaction, _):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            message = await send_song_dm(interaction.user, self.player.current, interaction.guild.name)
+        except PlayerError as e:
+            message = str(e)
+        await interaction.followup.send(message, ephemeral=True)
+
 
 class SearchSelectView(discord.ui.View):
     def __init__(self, bot: MugetsuBot, author: discord.Member, results: list[dict]):
@@ -125,5 +147,49 @@ class SearchSelectView(discord.ui.View):
             self.select.placeholder = "Search timed out"
             try:
                 await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass
+
+
+class RadioSelectView(discord.ui.View):
+    """Under /radio: switch to one of the other matching stations."""
+
+    def __init__(self, bot: MugetsuBot, author: discord.Member, stations: list):
+        super().__init__(timeout=90)
+        self.bot = bot
+        self.author = author
+        self.stations = stations
+        self.message: discord.Message | None = None
+        self.select = discord.ui.Select(
+            placeholder="Switch station…",
+            options=[
+                discord.SelectOption(label=s.name[:100], description=(s.summary or "Radio")[:100], value=str(i))
+                for i, s in enumerate(stations[:25])
+            ],
+        )
+        self.select.callback = self._on_select
+        self.add_item(self.select)
+
+    async def _on_select(self, interaction: discord.Interaction):
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message("This isn't your search.", ephemeral=True)
+            return
+        await interaction.response.defer()
+        station = self.stations[int(self.select.values[0])]
+        player = self.bot.players.get(interaction.guild_id)
+        song = self.bot.players.station_song(station, Requester.of(interaction.user))
+        try:
+            await self.bot.players.join(interaction.user)
+            await player.enqueue([song], top=True, channel_id=interaction.channel_id, actor=interaction.user)
+            if player.current is not song and player.current is not None and player.current.stream_url:
+                await player.skip()  # swap one station for another rather than queueing behind a live stream
+            await interaction.followup.send(f"📻 Switched to **{discord.utils.escape_markdown(station.name)}**.")
+        except PlayerError as e:
+            await interaction.followup.send(str(e), ephemeral=True)
+
+    async def on_timeout(self):
+        if self.message:
+            try:
+                await self.message.edit(view=None)
             except discord.HTTPException:
                 pass

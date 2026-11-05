@@ -275,3 +275,24 @@ def test_background_work_runs_at_lower_priority(monkeypatch):
     assert youtube.background_command(["python"]) == ["python"]
     monkeypatch.setattr(youtube.os, "name", "nt")
     assert youtube.background_command(["python"]) == ["python"]
+
+
+async def test_settings_upgrade_an_old_database(tmp_path):
+    """The NAS already has a settings.db from before autoplay existed: it must upgrade in place."""
+    import aiosqlite
+
+    async with aiosqlite.connect(tmp_path / "settings.db") as db:
+        await db.execute("CREATE TABLE guild_settings (guild_id INTEGER PRIMARY KEY, volume REAL DEFAULT 1.0, "
+                         "twenty_four_seven BOOLEAN DEFAULT 0)")
+        await db.execute("INSERT INTO guild_settings VALUES (7, 0.6, 1)")
+        await db.commit()
+    settings = GuildSettings(tmp_path)
+    await settings.initialize()
+    old = settings.get(7)
+    assert (old.volume, old.twenty_four_seven, old.autoplay) == (0.6, True, False)
+    await settings.save(7, autoplay=True)
+    await settings.close()
+    again = GuildSettings(tmp_path)
+    await again.initialize()
+    assert (again.get(7).volume, again.get(7).twenty_four_seven, again.get(7).autoplay) == (0.6, True, True)
+    await again.close()

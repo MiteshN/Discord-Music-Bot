@@ -9,15 +9,18 @@ import { Header } from "./Header";
 import { HistoryList } from "./HistoryList";
 import { Lyrics } from "./Lyrics";
 import { NowPlaying } from "./NowPlaying";
+import { PlaylistsPanel } from "./PlaylistsPanel";
 import { QueueList } from "./QueueList";
 import { SearchOverlay } from "./Search";
 import { ServerRail } from "./ServerRail";
+import { StatsOverlay } from "./StatsOverlay";
 import { Ambient, Centered, MiniPlayer, MobileNav, PanelTabs, Toasts } from "./Shell";
 
 function PanelBody() {
   const panel = useStore((s) => s.panel);
   if (panel === "lyrics") return <Lyrics />;
   if (panel === "history") return <HistoryList />;
+  if (panel === "playlists") return <PlaylistsPanel />;
   return <QueueList />;
 }
 
@@ -104,7 +107,7 @@ export function Dashboard() {
             ) : (
               <>
                 <h2 className="px-5 pb-2 text-xl font-bold tracking-tight">
-                  {{ queue: "Up next", lyrics: "Lyrics", history: "History" }[mobileView]}
+                  {{ queue: "Up next", lyrics: "Lyrics", playlists: "Playlists", history: "History" }[mobileView]}
                 </h2>
                 <PanelBody />
                 <MiniPlayer />
@@ -115,6 +118,7 @@ export function Dashboard() {
         {guildId && layout === "phone" && <MobileNav />}
       </div>
       <SearchOverlay />
+      <StatsOverlay />
       <Toasts />
     </div>
   );

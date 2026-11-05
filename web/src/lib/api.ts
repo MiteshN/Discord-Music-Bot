@@ -1,4 +1,4 @@
-import type { BotInfo, Guild, LyricsData, PlayerState, SearchResults, User } from "../types";
+import type { BotInfo, Guild, LyricsData, PlayerState, Playlist, SearchResults, Stats, StatsPeriod, User } from "../types";
 
 export class ApiError extends Error {
   constructor(
@@ -52,4 +52,9 @@ export const api = {
     request<SearchResults>("GET", `/api/guilds/${guildId}/search?q=${encodeURIComponent(query)}`, undefined, signal),
   lyrics: (guildId: string, signal?: AbortSignal) =>
     request<LyricsData>("GET", `/api/guilds/${guildId}/lyrics`, undefined, signal),
+  stats: (guildId: string, period: StatsPeriod, signal?: AbortSignal) =>
+    request<Stats>("GET", `/api/guilds/${guildId}/stats?period=${period}`, undefined, signal),
+  playlists: (signal?: AbortSignal) => request<Playlist[]>("GET", "/api/playlists", undefined, signal),
+  playlistAction: (action: string, args: Record<string, unknown>) =>
+    request<{ message: string }>("POST", `/api/playlists/actions/${action}`, args),
 };

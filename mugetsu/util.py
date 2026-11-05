@@ -23,6 +23,26 @@ def parse_timestamp(ts: str) -> int:
     return seconds
 
 
+def parse_positions(text: str) -> list[int]:
+    """Parse queue positions like "3", "3-7" or "1, 4 9" (1-based) into sorted 0-based indices."""
+    indices: set[int] = set()
+    for part in re.split(r"[,\s]+", text.strip()):
+        if not part:
+            continue
+        if m := re.fullmatch(r"(\d+)\s*-\s*(\d+)", part):
+            start, end = sorted((int(m[1]), int(m[2])))
+            if end - start > 1000:
+                raise ValueError(part)
+            indices.update(range(start - 1, end))
+        elif part.isdigit():
+            indices.add(int(part) - 1)
+        else:
+            raise ValueError(part)
+    if not indices or min(indices) < 0:
+        raise ValueError(text)
+    return sorted(indices)
+
+
 def short_error(e: BaseException) -> str:
     msg = str(e).replace("ERROR: ", "").strip() or type(e).__name__
     return msg[:200]
