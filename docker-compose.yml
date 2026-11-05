@@ -1,7 +1,8 @@
 services:
   bot:
     image: ghcr.io/miteshn/discord-music-bot:latest
-    restart: always
+    # build: .   # use this instead of `image` to build from source
+    restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:
@@ -11,11 +12,11 @@ services:
       - SPOTIFY_CLIENT_ID=
       - SPOTIFY_CLIENT_SECRET=
       - GENIUS_API_TOKEN=
-      # - CACHE_LIMIT_MB=2048
-      # - MAX_CACHE_DURATION=1800
-      # Dashboard (optional - set these to enable the web dashboard)
+      # Web dashboard (optional: set the client ID and secret to enable it)
       - DISCORD_CLIENT_ID=
       - DISCORD_CLIENT_SECRET=
       - DASHBOARD_SECRET_KEY=
-      - DASHBOARD_URL=http://localhost:8080  # change to http://<your-server-ip>:8080 for remote access
-      # - DASHBOARD_PORT=8080
+      - DASHBOARD_URL=http://localhost:8080  # e.g. http://192.168.1.11:8080 for other devices on your network
+      # - CACHE_LIMIT_MB=2048
+      # - MAX_CACHE_DURATION=1800
+      # - DJ_ROLE_NAME=DJ

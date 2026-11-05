@@ -1,5 +1,8 @@
 .env
 CLAUDE.md
+.claude/
+
+# Python
 __pycache__/
 *.pyc
 *.pyo
@@ -7,8 +10,18 @@ __pycache__/
 venv/
 env/
 *.egg-info/
-dist/
 build/
+.pytest_cache/
+.ruff_cache/
+
+# Dashboard
+web/node_modules/
+web/dist/
+dist/
+
+# Runtime data (audio cache and settings)
 cache/
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
