@@ -141,18 +141,19 @@ class GuildPlayer:
         self.play_id += 1
         token = self.play_id
         loop = asyncio.get_running_loop()
+        stderr = getattr(source, "stderr_tail", None)
 
         def after(error):
             if error:
                 log.error("[Guild %d] Player error: %r", self.guild_id, error, exc_info=error)
             if not loop.is_closed():
-                asyncio.run_coroutine_threadsafe(self._on_track_end(token, error), loop)
+                asyncio.run_coroutine_threadsafe(self._on_track_end(token, error, stderr), loop)
 
         if vc.is_playing() or vc.is_paused():
             vc.stop()
         vc.play(source, after=after)
 
-    async def _on_track_end(self, token: int, error: BaseException | None = None):
+    async def _on_track_end(self, token: int, error: BaseException | None = None, stderr=None):
         if self.closed:
             return
         async with self.lock:
@@ -163,11 +164,25 @@ class GuildPlayer:
             failed = song is not None and self.q.position < 2 and song.duration > 5
             if failed:
                 song.track = None  # force a fresh extraction if it's retried later
-                reason = f" ({short_error(error)})" if error else ""
+                why = short_error(error) if error else await self._ffmpeg_reason(stderr)
+                reason = f" ({why})" if why else ""
                 await self.manager.hooks.notice(
                     self, f"⚠️ Playback of **{esc(song.title)}** failed{reason}, skipping."
                 )
             await self._play_from(self.q.advance(failed=failed))
+
+    async def _ffmpeg_reason(self, stderr) -> str:
+        """Why FFmpeg gave up, from its own output (e.g. an HTTP 403 from YouTube)."""
+        if stderr is None:
+            return ""
+        for _ in range(10):  # discord.py's stderr reader thread may still be catching up
+            if stderr.text():
+                break
+            await asyncio.sleep(0.05)
+        text = stderr.text()
+        if text:
+            log.warning("[Guild %d] FFmpeg output:\n%s", self.guild_id, text)
+        return stderr.reason()
 
     async def _play_from(self, song: Song | None, *, announce: bool = True) -> Song | None:
         while song:

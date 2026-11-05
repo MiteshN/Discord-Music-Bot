@@ -19,9 +19,9 @@ from dataclasses import dataclass
 
 import aiosqlite
 
-from mugetsu.media.youtube import AUDIO_FORMAT
+from mugetsu.media.youtube import AUDIO_FORMAT, cli_args
 
-log = logging.getLogger("bot.cache")
+log = logging.getLogger("mugetsu.cache")
 
 YOUTUBE_ID_RE = re.compile(
     r"(?:youtube\.com/watch\?.*v=|youtu\.be/|youtube\.com/embed/|youtube\.com/shorts/)([A-Za-z0-9_-]{11})"
@@ -150,7 +150,7 @@ class CacheManager:
             # A separate yt-dlp process: never touches the bot's GIL and can be killed cleanly
             proc = await asyncio.create_subprocess_exec(
                 sys.executable, "-m", "yt_dlp", url,
-                "-f", AUDIO_FORMAT, "--no-playlist", "--no-part", "--no-mtime", "--quiet", "--no-warnings",
+                "-f", AUDIO_FORMAT, *cli_args(), "--no-playlist", "--no-part", "--no-mtime", "--quiet", "--no-warnings",
                 "-o", os.path.join(self.cache_dir, f"{cache_key}.%(ext)s"),
                 "--print", "after_move:filepath", "--print", "after_move:acodec", "--no-simulate",
                 stdout=asyncio.subprocess.PIPE,

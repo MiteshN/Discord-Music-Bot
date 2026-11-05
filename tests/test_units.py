@@ -6,8 +6,9 @@ import time
 
 import pytest
 
+from mugetsu.media import youtube
 from mugetsu.media.cache import CacheManager
-from mugetsu.media.ffmpeg import AudioInput, effect_catalog, ffmpeg_args, get_filter
+from mugetsu.media.ffmpeg import AudioInput, StderrTail, effect_catalog, ffmpeg_args, get_filter
 from mugetsu.media.lyrics import clean_title, parse_lrc, pick_best, split_artist, split_lyrics
 from mugetsu.player.models import LoopMode, Song
 from mugetsu.player.queue import GuildQueue
@@ -204,3 +205,44 @@ async def test_cache_cleanup_keeps_databases_and_dotfiles(tmp_path):
     assert await cache.lookup("missing") is None
     assert (await cache.get_stats())["misses"] == 1
     await cache.close()
+
+
+# Real FFmpeg output from a failed stream (URL shortened; the real one carries the server's IP)
+FFMPEG_403 = b"""[https @ 0x55d526417200] HTTP error 403 Forbidden
+[in#0 @ 0x55d526416200] Error opening input: Server returned 403 Forbidden (access denied)
+Error opening input file https://rr10---sn-8xgp1vo-ab5k.googlevideo.com/videoplayback?expire=1&ip=203.0.113.7&c=TVHTML5&sig=x.
+Error opening input files: Server returned 403 Forbidden (access denied)
+"""
+
+
+class TestStderrTail:
+    def test_reason_from_a_403(self):
+        tail = StderrTail()
+        tail.write(FFMPEG_403[:40])
+        tail.write(FFMPEG_403[40:])
+        assert tail.reason() == "Server returned 403 Forbidden (access denied)"
+
+    def test_urls_and_ip_never_leak(self):
+        tail = StderrTail()
+        tail.write(FFMPEG_403)
+        assert "googlevideo" not in tail.text() and "203.0.113.7" not in tail.text()
+        assert "<url>" in tail.text()
+
+    def test_keeps_only_the_end(self):
+        tail = StderrTail(limit=64)
+        tail.write(b"x" * 1000 + b"\nfinal line\n")
+        assert len(tail.text()) <= 64 and tail.reason() == "final line"
+
+    def test_empty(self):
+        assert StderrTail().reason() == ""
+
+    def test_discord_py_will_pipe_into_it(self):
+        # discord.py only pipes stderr into objects without a usable fileno()
+        assert not hasattr(StderrTail(), "fileno")
+
+
+def test_youtube_tv_clients_are_excluded_by_default():
+    assert youtube.PLAYER_CLIENTS[0] == "default"
+    assert {"-tv", "-tv_samsung", "-tv_simply", "-tv_downgraded"} <= set(youtube.PLAYER_CLIENTS)
+    assert youtube._OPTIONS["track"]["extractor_args"]["youtube"]["player_client"] == youtube.PLAYER_CLIENTS
+    assert youtube.cli_args() == ["--extractor-args", "youtube:player_client=" + ",".join(youtube.PLAYER_CLIENTS)]
