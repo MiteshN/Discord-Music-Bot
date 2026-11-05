@@ -97,8 +97,18 @@ const SOURCE_STYLES: Record<string, { label: string; className: string }> = {
   web: { label: "Web", className: "text-ink-2 bg-panel-3" },
 };
 
-export function SourceBadge({ source }: { source: string }) {
+/** "tag": a small label for list rows. "pill": matches the other chips under the song title. */
+export function SourceBadge({ source, variant = "tag" }: { source: string; variant?: "tag" | "pill" }) {
   const style = SOURCE_STYLES[source] ?? SOURCE_STYLES.web;
+  if (variant === "pill") {
+    // pt-px: 12px Inter sits half a pixel high in a 16px line; this centers it optically
+    return (
+      <span className={`inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 pt-px text-xs font-medium ${style.className}`}>
+        <span className="size-1.5 rounded-full bg-current" aria-hidden />
+        {style.label}
+      </span>
+    );
+  }
   return (
     <span className={`rounded px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide ${style.className}`}>
       {style.label}

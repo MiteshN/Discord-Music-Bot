@@ -54,7 +54,7 @@ function Row({ song, index }: { song: Song; index: number }) {
           <Avatar src={song.requester_avatar} name={`Added by ${song.requester}`} size={14} className="ml-0.5" />
         </div>
       </div>
-      <div className="flex shrink-0 items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100">
+      <div className="flex max-w-0 shrink-0 items-center overflow-hidden group-focus-within:max-w-40 group-hover:max-w-40 pointer-coarse:max-w-none">
         <IconButton label="Play now" size="sm" busy={busy[`skipto:${song.id}`]} onClick={() => controls.skipTo(song.id)}>
           <Play size={15} fill="currentColor" />
         </IconButton>

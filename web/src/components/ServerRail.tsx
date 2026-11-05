@@ -1,5 +1,6 @@
 import { LogOut } from "lucide-react";
-import { useState } from "react";
+import { useState, type FocusEvent, type MouseEvent } from "react";
+import { createPortal } from "react-dom";
 import { initials } from "../lib/format";
 import { useStore } from "../store";
 import type { Guild } from "../types";
@@ -29,12 +30,22 @@ export function ServerRail() {
   const selectGuild = useStore((s) => s.selectGuild);
   const user = useStore((s) => s.user);
   const signOut = useStore((s) => s.signOut);
+  // The tooltip is drawn outside the scrolling list: inside it, it would add a sideways scrollbar
+  const [tip, setTip] = useState<{ name: string; top: number; left: number } | null>(null);
+
+  const showTip = (name: string) => (e: MouseEvent<HTMLElement> | FocusEvent<HTMLElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    setTip({ name, top: r.top + r.height / 2, left: r.right + 16 });
+  };
+  const hideTip = () => setTip(null);
 
   return (
     <aside className="hidden w-[76px] shrink-0 flex-col items-center gap-3 border-r border-line bg-black/30 py-4 backdrop-blur-xl lg:flex">
       <Logo className="size-11" />
       <div className="h-px w-8 bg-line-2" />
-      <nav aria-label="Servers" className="scrollbar-thin flex min-h-0 flex-1 flex-col items-center gap-2.5 overflow-y-auto px-3 py-1">
+      <nav aria-label="Servers" onScroll={hideTip}
+        className="scrollbar-thin flex min-h-0 flex-1 flex-col items-center gap-2.5 overflow-y-auto overflow-x-hidden px-3 py-1"
+      >
         {guilds.map((g) => {
           const active = g.id === guildId;
           return (
@@ -44,6 +55,10 @@ export function ServerRail() {
               onClick={() => selectGuild(g.id)}
               aria-label={g.name}
               aria-current={active || undefined}
+              onMouseEnter={showTip(g.name)}
+              onMouseLeave={hideTip}
+              onFocus={showTip(g.name)}
+              onBlur={hideTip}
               className="group relative"
             >
               <span
@@ -62,13 +77,21 @@ export function ServerRail() {
                   <span className="sr-only">Playing</span>
                 </span>
               )}
-              <span className="pointer-events-none absolute left-full top-1/2 z-50 ml-4 -translate-y-1/2 whitespace-nowrap rounded-lg bg-black/90 px-3 py-1.5 text-sm font-medium opacity-0 shadow-xl transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-                {g.name}
-              </span>
             </button>
           );
         })}
       </nav>
+      {tip &&
+        createPortal(
+          <span
+            role="tooltip"
+            className="pointer-events-none fixed z-50 -translate-y-1/2 animate-pop whitespace-nowrap rounded-lg bg-black/90 px-3 py-1.5 text-sm font-medium text-ink shadow-xl"
+            style={{ top: tip.top, left: tip.left }}
+          >
+            {tip.name}
+          </span>,
+          document.body,
+        )}
       {user && (
         <div className="group relative">
           <img src={user.avatar} alt="" referrerPolicy="no-referrer" className="size-10 rounded-full bg-panel-3 object-cover" />

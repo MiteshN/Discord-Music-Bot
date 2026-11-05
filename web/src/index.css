@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Short screens, e.g. the iPhone Duo folded (~678px) or open and turned sideways (~626px) */
+@custom-variant short (@media (max-height: 720px));
+
 @theme {
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 
