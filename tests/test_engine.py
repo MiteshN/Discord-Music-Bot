@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from mugetsu.player.models import LoopMode, PlayerError
@@ -199,7 +201,12 @@ async def test_destroy_resets_state(manager, connected):
 
 async def test_inactivity_leaves_an_empty_channel(manager, connected):
     await connected.enqueue([make_song("one")])
-    connected.alone_since = 1  # long ago
+    timeout = manager.config.alone_timeout
+    # Relative to now: monotonic() counts from boot, which can be seconds ago on a fresh CI runner
+    connected.alone_since = time.monotonic() - timeout + 30  # alone, but not for long enough yet
+    await manager.check_inactivity()
+    assert manager.peek(connected.guild_id) is connected
+    connected.alone_since = time.monotonic() - timeout - 1
     await manager.check_inactivity()
     assert manager.peek(connected.guild_id) is None
     assert any("everyone left" in n for n in manager.hooks.notices)
