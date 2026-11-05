@@ -17,7 +17,7 @@ from mugetsu.media import youtube
 from mugetsu.media.cache import CacheManager
 from mugetsu.media.ffmpeg import AudioInput, build_source, get_filter, is_opus
 from mugetsu.media.lyrics import Lyrics, LyricsFetcher
-from mugetsu.media.radio import RadioBrowser, Station
+from mugetsu.media.radio import RadioBrowser, Station, parse_radio_query
 from mugetsu.media.spotify import SpotifyResolver
 from mugetsu.player.events import EventBus, StateNotifier
 from mugetsu.player.models import LoopMode, PlayerError, Song, song_key
@@ -81,7 +81,7 @@ class PlayerManager:
         self.spotify = SpotifyResolver(config.spotify_client_id, config.spotify_client_secret)
         self.lyrics = LyricsFetcher(config.genius_token)
         self.store = Store(config.cache_dir)
-        self.radio = RadioBrowser(lambda: self.http)
+        self.radio = RadioBrowser(lambda: self.http, prefer_country=config.radio_country)
         self.http: aiohttp.ClientSession | None = None
         self.events = EventBus()
         self.notify = StateNotifier(self.events, self.snapshot)
@@ -388,7 +388,8 @@ class PlayerManager:
 
         if key.startswith("radio ") or key == "radio":
             try:
-                stations = await self.radio.search(query.strip()[6:], limit=8)
+                name, country = parse_radio_query(query.strip()[6:])
+                stations = await self.radio.search(name, country, limit=8)
             except Exception as e:
                 log.warning("Radio search failed for %r: %s", query, e)
                 stations = []

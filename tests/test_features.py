@@ -8,9 +8,8 @@ import time
 import pytest
 
 from mugetsu import game as game_module
-from mugetsu.cogs.playback import parse_radio_query
 from mugetsu.game import GuessTheSong, artists_of, matches, spotify_query
-from mugetsu.media.radio import RadioBrowser, Station
+from mugetsu.media.radio import RadioBrowser, Station, parse_radio_query
 from mugetsu.player.models import PlayerError, Song
 from mugetsu.store import Store
 from mugetsu.util import parse_positions
@@ -276,7 +275,107 @@ async def test_radio_search_falls_back_to_genre(monkeypatch):
     monkeypatch.setattr(radio, "_get", fake_get)
     stations = await radio.search("Lofi", "jp")
     assert [s.name for s in stations] == ["Lofi 24/7"] and stations[0].summary == "Japan · lofi, chill · 128 kbps"
-    assert asked[0]["name"] == "Lofi" and asked[1]["tag"] == "lofi" and asked[0]["countrycode"] == "jp"
+    assert asked[0]["name"] == "Lofi" and asked[1]["tag"] == "lofi" and asked[0]["countrycode"] == "JP"
+
+
+def _station_row(uuid, name, code, tags=""):
+    return {"stationuuid": uuid, "name": name, "url_resolved": f"http://s/{uuid}", "countrycode": code, "tags": tags}
+
+
+def _directory(rows: dict[tuple[str, str], list[dict]], calls: list):
+    """A fake radio-browser keyed by (country code or "" for worldwide, "name" / "tag" / "all")."""
+    async def fake_get(path, params=None):
+        calls.append(params)
+        kind = "name" if "name" in params else "tag" if "tag" in params else "all"
+        return rows.get((params.get("countrycode", ""), kind), [])
+    return fake_get
+
+
+async def test_radio_lists_home_country_first(monkeypatch):
+    radio = RadioBrowser(lambda: None, prefer_country="US")
+    calls = []
+    monkeypatch.setattr(radio, "_get", _directory({
+        ("US", "name"): [_station_row("us1", "Lofi Girl USA", "US"), _station_row("us2", "Chill Lofi", "US")],
+        ("", "name"): [_station_row("de1", "Lofi Berlin", "DE"), _station_row("us1", "Lofi Girl USA", "US"),
+                       _station_row("jp1", "Lofi Tokyo", "JP")],
+    }, calls))
+    stations = await radio.search("lofi", limit=4)
+    # Home stations first, the rest of the world after, nothing twice, and capped at the limit
+    assert [s.uuid for s in stations] == ["us1", "us2", "de1", "jp1"]
+    assert stations[0].countrycode == "US"
+    assert {c.get("countrycode", "") for c in calls} == {"US", ""}
+
+
+async def test_radio_ignores_home_stations_that_only_match_mid_word(monkeypatch):
+    radio = RadioBrowser(lambda: None, prefer_country="US")
+    monkeypatch.setattr(radio, "_get", _directory({
+        ("US", "name"): [_station_row("us1", "102.1 WDRM - Huntsville", "US")],  # "nts" inside a word
+        ("US", "tag"): [_station_row("us2", "WYML 99.9", "US", "news,current events")],  # same, in a tag
+        ("", "name"): [_station_row("de1", "Huntsman FM", "DE"), _station_row("gb1", "NTS Radio 1", "GB"),
+                       _station_row("gb2", "NTS Radio 2", "GB")],
+    }, []))
+    # Real matches first, mid-word ones after, and the stray home station not at all
+    assert [s.uuid for s in await radio.search("nts")] == ["gb1", "gb2", "de1"]
+
+
+async def test_radio_home_genre_matches_still_come_first(monkeypatch):
+    radio = RadioBrowser(lambda: None, prefer_country="US")
+    monkeypatch.setattr(radio, "_get", _directory({
+        ("US", "tag"): [_station_row("us1", "Love 92.1", "US", "pop,top 100 hits")],  # tagged, not named it
+        ("", "name"): [_station_row("de1", "# TOP 100 CHARTS - DJ MIXES", "DE")],
+    }, []))
+    assert [s.uuid for s in await radio.search("top 100")] == ["us1", "de1"]
+
+
+async def test_radio_exact_name_wins_and_repeats_are_dropped(monkeypatch):
+    radio = RadioBrowser(lambda: None, prefer_country="US")
+    monkeypatch.setattr(radio, "_get", _directory({
+        ("US", "name"): [_station_row("us1", "BBC Radio 1 Relay", "US")],
+        ("", "name"): [_station_row("gb1", "BBC Radio 1", "GB"), _station_row("gb2", "BBC Radio 1", "GB"),
+                       _station_row("gb3", "BBC Radio 1Xtra", "GB")],
+    }, []))
+    assert [s.uuid for s in await radio.search("bbc radio 1")] == ["gb1", "us1", "gb3"]
+
+
+async def test_radio_country_any_and_explicit_skip_the_preference(monkeypatch):
+    radio = RadioBrowser(lambda: None, prefer_country="US")
+    calls = []
+    monkeypatch.setattr(radio, "_get", _directory({("", "name"): [_station_row("de1", "Jazz Radio", "DE")],
+                                                   ("FR", "name"): [_station_row("fr1", "FIP Jazz", "FR")]}, calls))
+    assert [s.uuid for s in await radio.search("jazz", "any")] == ["de1"]
+    assert [s.uuid for s in await radio.search("jazz", "fr")] == ["fr1"]
+    assert all(c.get("countrycode") != "US" for c in calls)
+    assert RadioBrowser(lambda: None, prefer_country="any").prefer_country == ""
+
+
+async def test_radio_falls_back_to_the_world_when_home_search_fails(monkeypatch):
+    radio = RadioBrowser(lambda: None, prefer_country="US")
+
+    async def flaky_get(path, params=None):
+        if params.get("countrycode") == "US":
+            raise RuntimeError("mirror down")
+        return [_station_row("gb1", "BBC Radio 1", "GB")]
+
+    monkeypatch.setattr(radio, "_get", flaky_get)
+    assert [s.name for s in await radio.search("bbc radio 1")] == ["BBC Radio 1"]
+
+    async def down(path, params=None):
+        raise RuntimeError("directory down")
+
+    monkeypatch.setattr(radio, "_get", down)
+    with pytest.raises(RuntimeError):
+        await radio.search("bbc radio 1")
+
+
+def test_radio_country_setting(monkeypatch):
+    from mugetsu.config import Config
+
+    monkeypatch.delenv("RADIO_COUNTRY", raising=False)
+    assert Config.from_env().radio_country == "US"
+    monkeypatch.setenv("RADIO_COUNTRY", "")
+    assert Config.from_env().radio_country == ""
+    monkeypatch.setenv("RADIO_COUNTRY", " gb ")
+    assert Config.from_env().radio_country == "gb"
 
 
 async def test_radio_songs_stream_directly(manager):

@@ -18,7 +18,7 @@ A Discord music bot with a real-time web dashboard. Plays YouTube, Spotify, Soun
 - **Saved playlists**: save the queue, add songs with one click, load them in any server, and share them with a code.
 - **Autoplay**: when the queue runs out, keep going with songs related to the last one.
 - **Picks up after restarts**: after an update or reboot, the bot rejoins and carries on from the same spot in the same song.
-- **Internet radio**: thousands of stations from radio-browser.info, by name, genre or country.
+- **Internet radio**: thousands of stations from radio-browser.info, by name, genre or country, with your own country's stations listed first.
 - **Server stats**: top songs, requesters and artists, and listening time, for the week, month or all time.
 - **Queue cleanup**: remove ranges, duplicates, one person's songs, or songs from people who've left.
 - **Web dashboard** (optional): sign in with Discord, control playback, drag to reorder the queue, search (including radio), follow synced lyrics, manage playlists, browse stats, and see what everyone else is doing, live.
@@ -48,7 +48,7 @@ Every command works as a slash command and with the `!` prefix.
 | `/removedupes` · `/removeuser [@member]` · `/removeabsent` | Remove duplicates, someone's songs, or songs from people who left |
 | `/autoplay [on/off]` | Keep playing related songs when the queue runs out |
 | `/playrecent [count]` | Queue the songs you requested most recently |
-| `/radio <name or genre> [--country=…]` | Play an internet radio station |
+| `/radio <name or genre> [--country=…]` | Play an internet radio station. `--country=japan` searches one country, `--country=any` the whole world |
 | `/save` | Send the current song to your DMs (also the ❤️ button) |
 | `/lyrics` | Lyrics for the current song |
 | `/nightcore` `/vaporwave` `/bassboost` `/8d` `/tremolo` `/vibrato` | Effects |
@@ -150,6 +150,7 @@ Adding a song from the dashboard makes the bot join your voice channel if you're
 | `MAX_CACHE_DURATION` | `1800` | Longest track (seconds) worth caching |
 | `IDLE_TIMEOUT` / `ALONE_TIMEOUT` | `600` / `180` | Seconds before leaving when idle / alone |
 | `RESUME_WINDOW` | `900` | After a restart, pick up sessions saved within this many seconds. `0` turns it off |
+| `RADIO_COUNTRY` | `US` | Radio search lists this country's stations first, then the rest of the world (two-letter code or country name). Empty or `any` for no preference |
 | `LOG_LEVEL` | `INFO` | `DEBUG` for more detail |
 | `YOUTUBE_PLAYER_CLIENTS` | `default,-tv,…` | YouTube clients yt-dlp may use. The TV clients are left out because FFmpeg gets HTTP 403 on their stream URLs |
 
