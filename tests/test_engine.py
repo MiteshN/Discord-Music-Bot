@@ -95,6 +95,15 @@ async def test_track_dying_immediately_is_not_looped(connected):
     assert any("failed, skipping" in n for n in connected.manager.hooks.notices)
 
 
+async def test_audio_thread_errors_are_reported(connected):
+    """When discord.py's audio thread dies (e.g. voice encryption failing), say why."""
+    await connected.enqueue([make_song("doomed"), make_song("next")])
+    connected.voice.finish(RuntimeError("no encryption key for epoch"))
+    await settle()
+    assert connected.current.title == "next"
+    assert any("failed (no encryption key for epoch)" in n for n in connected.manager.hooks.notices)
+
+
 async def test_previous_goes_back(connected):
     await connected.enqueue([make_song("one"), make_song("two")])
     await connected.skip()

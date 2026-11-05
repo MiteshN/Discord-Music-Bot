@@ -144,15 +144,15 @@ class GuildPlayer:
 
         def after(error):
             if error:
-                log.error("[Guild %d] Player error: %s", self.guild_id, error)
+                log.error("[Guild %d] Player error: %r", self.guild_id, error, exc_info=error)
             if not loop.is_closed():
-                asyncio.run_coroutine_threadsafe(self._on_track_end(token), loop)
+                asyncio.run_coroutine_threadsafe(self._on_track_end(token, error), loop)
 
         if vc.is_playing() or vc.is_paused():
             vc.stop()
         vc.play(source, after=after)
 
-    async def _on_track_end(self, token: int):
+    async def _on_track_end(self, token: int, error: BaseException | None = None):
         if self.closed:
             return
         async with self.lock:
@@ -163,7 +163,10 @@ class GuildPlayer:
             failed = song is not None and self.q.position < 2 and song.duration > 5
             if failed:
                 song.track = None  # force a fresh extraction if it's retried later
-                await self.manager.hooks.notice(self, f"⚠️ Playback of **{esc(song.title)}** failed, skipping.")
+                reason = f" ({short_error(error)})" if error else ""
+                await self.manager.hooks.notice(
+                    self, f"⚠️ Playback of **{esc(song.title)}** failed{reason}, skipping."
+                )
             await self._play_from(self.q.advance(failed=failed))
 
     async def _play_from(self, song: Song | None, *, announce: bool = True) -> Song | None:

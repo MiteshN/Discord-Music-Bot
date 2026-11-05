@@ -100,20 +100,20 @@ class FakeVoiceClient:
         self._after = after
         self.played.append(source)
 
-    def _end(self):
+    def _end(self, error=None):
         after, self._after = self._after, None
         self.source = None
         self.paused = False
         if after:
-            after(None)
+            after(error)
 
     def stop(self):
         if self.source is not None:
             self._end()
 
-    def finish(self):
-        """The track played to the end."""
-        self._end()
+    def finish(self, error: Exception | None = None):
+        """The track played to the end, or (with an error) the audio thread died, as discord.py reports it."""
+        self._end(error)
 
     def pause(self):
         self.paused = True
