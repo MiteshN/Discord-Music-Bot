@@ -9,6 +9,7 @@ so discord.py's own encoder is never involved either way.
 
 from __future__ import annotations
 
+import re
 import shlex
 from dataclasses import dataclass
 
@@ -110,6 +111,47 @@ def ffmpeg_args(inp: AudioInput, *, volume: float, audio_filter: AudioFilter | N
     return FFmpegArgs(before, options, passthrough=inp.is_opus and not chain)
 
 
+_URL = re.compile(r"https?://\S+")
+_LOG_PREFIX = re.compile(r"^\[[^\]]*@ 0x[0-9a-f]+\]\s*")
+
+
+class StderrTail:
+    """Keeps the end of FFmpeg's error output.
+
+    discord.py pipes stderr into any object that has write() but no fileno(). We need it
+    because discord.py reports an FFmpeg failure only after it has already said the track
+    ended, so e.g. an HTTP 403 otherwise just looks like a track that stopped.
+    """
+
+    def __init__(self, limit: int = 4096):
+        self._data = bytearray()
+        self._limit = limit
+
+    def write(self, data: bytes) -> int:
+        if data:
+            self._data += data
+            del self._data[: -self._limit]
+        return len(data)
+
+    def flush(self):
+        pass
+
+    def text(self) -> str:
+        """Everything kept, with stream URLs (which carry our IP address) removed."""
+        return _URL.sub("<url>", self._data.decode(errors="replace")).strip()
+
+    def reason(self) -> str:
+        """The most telling line, e.g. "Server returned 403 Forbidden (access denied)"."""
+        lines = [_LOG_PREFIX.sub("", line).strip() for line in self.text().splitlines()]
+        lines = [line for line in lines if line and "<url>" not in line]
+        if not lines:
+            return ""
+        last = lines[-1]
+        if last.lower().startswith("error") and ": " in last:
+            last = last.split(": ", 1)[1]
+        return last[:150]
+
+
 def build_source(
     inp: AudioInput,
     *,
@@ -119,14 +161,17 @@ def build_source(
     bitrate: int = 128,
 ) -> discord.FFmpegOpusAudio:
     args = ffmpeg_args(inp, volume=volume, audio_filter=audio_filter, position=position)
+    stderr = StderrTail()
     source = discord.FFmpegOpusAudio(
         inp.path,
         codec="copy" if args.passthrough else None,
         bitrate=bitrate,
         before_options=shlex.join(args.before) if args.before else None,
         options=shlex.join(args.options),
+        stderr=stderr,
     )
     source.passthrough = args.passthrough
+    source.stderr_tail = stderr
     return source
 
 

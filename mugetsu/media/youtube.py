@@ -12,16 +12,26 @@ import asyncio
 import functools
 import logging
 import multiprocessing
+import os
 import time
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass, field
 from urllib.parse import quote_plus
 
-log = logging.getLogger("bot.ytdl")
+log = logging.getLogger("mugetsu.ytdl")
 
 # Opus is what Discord speaks, so an Opus source can be passed through untouched.
 AUDIO_FORMAT = "bestaudio[acodec=opus]/bestaudio/best"
+
+# Which YouTube clients yt-dlp may get stream URLs from. FFmpeg fetches the URL itself,
+# and the TV clients' URLs refuse that with HTTP 403 (yt-dlp 2026.10.26 made tv_samsung
+# its first choice whenever a JS runtime like Deno is installed, which broke playback).
+# "default" keeps yt-dlp's own picks, so we still benefit from its updates.
+DEFAULT_PLAYER_CLIENTS = "default,-tv,-tv_downgraded,-tv_samsung,-tv_simply"
+PLAYER_CLIENTS = [
+    c.strip() for c in (os.getenv("YOUTUBE_PLAYER_CLIENTS") or DEFAULT_PLAYER_CLIENTS).split(",") if c.strip()
+]
 
 _BASE_OPTIONS = {
     "format": AUDIO_FORMAT,
@@ -30,7 +40,13 @@ _BASE_OPTIONS = {
     "no_warnings": True,
     "default_search": "ytsearch",
     "source_address": "0.0.0.0",
+    "extractor_args": {"youtube": {"player_client": PLAYER_CLIENTS}},
 }
+
+
+def cli_args() -> list[str]:
+    """The same client choice for a yt-dlp command line (the background cache download)."""
+    return ["--extractor-args", f"youtube:player_client={','.join(PLAYER_CLIENTS)}"]
 
 _OPTIONS = {
     "track": _BASE_OPTIONS,

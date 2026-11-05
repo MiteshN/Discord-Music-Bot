@@ -1,6 +1,6 @@
 # Voice stack: TEMPORARY PIN (added 2026-11-05). davey 0.2 changed how encryption keys
-# are switched in, and discord.py 2.7.1 doesn't support that yet: every track dies
-# within a second.
+# are switched in, and discord.py 2.7.1 doesn't support that yet: the bot shows as
+# playing but nobody hears anything.
 #
 # TODO: remove this pin once discord.py releases davey 0.2 support. It's being added in
 #   https://github.com/Rapptz/discord.py/pull/10548

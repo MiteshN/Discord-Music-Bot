@@ -104,6 +104,26 @@ async def test_audio_thread_errors_are_reported(connected):
     assert any("failed (no encryption key for epoch)" in n for n in connected.manager.hooks.notices)
 
 
+async def test_ffmpeg_failures_are_explained(connected):
+    """FFmpeg dying (e.g. a 403 from YouTube) reaches us as a clean end; its output says why."""
+    from mugetsu.media.ffmpeg import StderrTail
+
+    original = connected.manager.make_source
+
+    def make_source(inp, **kw):
+        source = original(inp, **kw)
+        source.stderr_tail = StderrTail()
+        source.stderr_tail.write(b"Error opening input files: Server returned 403 Forbidden (access denied)\n")
+        return source
+
+    connected.manager.make_source = make_source
+    await connected.enqueue([make_song("blocked"), make_song("next")])
+    connected.voice.finish()  # no Python error, just an empty stream
+    await settle(20)
+    assert connected.current.title == "next"
+    assert any("failed (Server returned 403 Forbidden (access denied))" in n for n in connected.manager.hooks.notices)
+
+
 async def test_previous_goes_back(connected):
     await connected.enqueue([make_song("one"), make_song("two")])
     await connected.skip()

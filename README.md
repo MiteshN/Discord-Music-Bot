@@ -131,6 +131,7 @@ Adding a song from the dashboard makes the bot join your voice channel if you're
 | `MAX_CACHE_DURATION` | `1800` | Longest track (seconds) worth caching |
 | `IDLE_TIMEOUT` / `ALONE_TIMEOUT` | `600` / `180` | Seconds before leaving when idle / alone |
 | `LOG_LEVEL` | `INFO` | `DEBUG` for more detail |
+| `YOUTUBE_PLAYER_CLIENTS` | `default,-tv,…` | YouTube clients yt-dlp may use. The TV clients are left out because FFmpeg gets HTTP 403 on their stream URLs |
 
 **How audio works:** a song's first play streams immediately while a copy downloads to the cache. Later plays read from disk. Livestreams and tracks longer than `MAX_CACHE_DURATION` always stream. When the cache is full, the least recently played files go first. For the best quality, leave the bot at 100% and adjust volume per person in Discord (right-click the bot, then User Volume).
 
