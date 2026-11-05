@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 
 import pytest
@@ -236,9 +237,27 @@ class TestStderrTail:
     def test_empty(self):
         assert StderrTail().reason() == ""
 
-    def test_discord_py_will_pipe_into_it(self):
-        # discord.py only pipes stderr into objects without a usable fileno()
-        assert not hasattr(StderrTail(), "fileno")
+    def test_ffmpeg_writes_to_it_directly(self):
+        # With a real fileno(), discord.py passes it straight to FFmpeg. Anything else makes it
+        # start a reader thread that spins after FFmpeg exits and causes stutter.
+        tail = StderrTail()
+        assert isinstance(tail.fileno(), int)
+        tail.close()
+
+    def test_writes_from_another_process_append_after_we_read(self):
+        # FFmpeg shares our file offset: its writes must still go to the end after we've seeked
+        tail = StderrTail()
+        os.write(tail.fileno(), b"first line\n")
+        assert tail.reason() == "first line"
+        os.write(tail.fileno(), b"Error opening input files: Server returned 403 Forbidden\n")
+        assert tail.reason() == "Server returned 403 Forbidden"
+        assert "first line" in tail.text()
+        tail.close()
+
+    def test_closed_is_harmless(self):
+        tail = StderrTail()
+        tail.close()
+        assert tail.text() == "" and tail.reason() == ""
 
 
 def test_youtube_tv_clients_are_excluded_by_default():
@@ -246,3 +265,13 @@ def test_youtube_tv_clients_are_excluded_by_default():
     assert {"-tv", "-tv_samsung", "-tv_simply", "-tv_downgraded"} <= set(youtube.PLAYER_CLIENTS)
     assert youtube._OPTIONS["track"]["extractor_args"]["youtube"]["player_client"] == youtube.PLAYER_CLIENTS
     assert youtube.cli_args() == ["--extractor-args", "youtube:player_client=" + ",".join(youtube.PLAYER_CLIENTS)]
+
+
+def test_background_work_runs_at_lower_priority(monkeypatch):
+    monkeypatch.setattr(youtube.os, "name", "posix")
+    monkeypatch.setattr(youtube.shutil, "which", lambda name: "/usr/bin/nice")
+    assert youtube.background_command(["python", "-m", "yt_dlp"]) == ["/usr/bin/nice", "-n", "10", "python", "-m", "yt_dlp"]
+    monkeypatch.setattr(youtube.shutil, "which", lambda name: None)
+    assert youtube.background_command(["python"]) == ["python"]
+    monkeypatch.setattr(youtube.os, "name", "nt")
+    assert youtube.background_command(["python"]) == ["python"]

@@ -154,6 +154,13 @@ class GuildPlayer:
         vc.play(source, after=after)
 
     async def _on_track_end(self, token: int, error: BaseException | None = None, stderr=None):
+        try:
+            await self._handle_track_end(token, error, stderr)
+        finally:
+            if stderr is not None:
+                stderr.close()  # FFmpeg is done with it
+
+    async def _handle_track_end(self, token: int, error: BaseException | None, stderr):
         if self.closed:
             return
         async with self.lock:
