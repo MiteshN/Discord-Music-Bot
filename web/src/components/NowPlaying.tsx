@@ -26,6 +26,8 @@ import { Artwork } from "./ui/Artwork";
 import { Avatar, Eq, IconButton, SourceBadge, Spinner } from "./ui/Buttons";
 import { Slider } from "./ui/Slider";
 
+const STOP_CONFIRM_MS = 4000;
+
 function Badge({ icon: Icon, children, accent = false }: { icon: typeof Clock; children: string; accent?: boolean }) {
   return (
     <span
@@ -104,25 +106,46 @@ function Progress({ player }: { player: PlayerState }) {
   const position = usePosition();
   const [preview, setPreview] = useState<number | null>(null);
   const cur = player.current;
-  const duration = cur?.duration ?? 0;
-  const seekable = !!cur && !!player.voice && duration > 0 && !cur.live;
+  const live = !!cur?.live;
+  const duration = live ? 0 : (cur?.duration ?? 0);
+  const seekable = !!cur && !!player.voice && duration > 0;
   const shown = preview ?? position;
 
   return (
     <div className="mt-5 w-full short:mt-3">
-      <Slider
-        label="Seek"
-        value={Math.floor(position)}
-        max={duration || 100}
-        disabled={!seekable}
-        onPreview={setPreview}
-        onCommit={(v) => controls.seek(v)}
-        format={formatTime}
-        hoverTip
-      />
+      {live ? (
+        // Radio and livestreams never end, so there's no progress to fill: show that it's live instead
+        <div className="flex h-5 items-center" aria-hidden>
+          <div className="relative h-1 w-full overflow-hidden rounded-full bg-accent/30">
+            <div
+              className={`absolute inset-y-0 left-0 w-1/3 bg-linear-to-r from-transparent via-accent-3 to-transparent motion-reduce:hidden ${
+                player.paused ? "hidden" : "animate-live-sweep"
+              }`}
+            />
+          </div>
+        </div>
+      ) : (
+        <Slider
+          label="Seek"
+          value={duration ? Math.floor(position) : 0}
+          max={duration || 1}
+          disabled={!seekable}
+          onPreview={setPreview}
+          onCommit={(v) => controls.seek(v)}
+          format={formatTime}
+          hoverTip
+        />
+      )}
       <div className="mt-1 flex justify-between text-xs text-ink-3 tabular">
         <span>{cur ? formatTime(shown) : "0:00"}</span>
-        <span>{cur ? (cur.live ? "LIVE" : duration ? formatTime(duration) : "–:––") : "0:00"}</span>
+        {live ? (
+          <span className="flex items-center gap-1.5 font-semibold tracking-wider text-accent-3">
+            <span className={`size-1.5 rounded-full bg-current ${player.paused ? "" : "animate-pulse"}`} />
+            LIVE
+          </span>
+        ) : (
+          <span>{cur ? (duration ? formatTime(duration) : "–:––") : "0:00"}</span>
+        )}
       </div>
     </div>
   );
@@ -131,8 +154,23 @@ function Progress({ player }: { player: PlayerState }) {
 function Transport({ player }: { player: PlayerState }) {
   const busy = useStore((s) => s.busy);
   const [confirmStop, setConfirmStop] = useState(false);
+  const stopTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const active = !!player.current && !!player.voice;
   const LoopIcon = player.loop === "track" ? Repeat1 : Repeat;
+
+  useEffect(() => () => clearTimeout(stopTimer.current), []);
+
+  // Stopping clears the queue and leaves the channel, so the first press only asks for a second one
+  const pressStop = () => {
+    clearTimeout(stopTimer.current);
+    if (confirmStop) {
+      setConfirmStop(false);
+      controls.stop();
+    } else {
+      setConfirmStop(true);
+      stopTimer.current = setTimeout(() => setConfirmStop(false), STOP_CONFIRM_MS);
+    }
+  };
 
   return (
     <div className="mt-3 flex items-center justify-center gap-2 sm:gap-4 short:mt-1">
@@ -174,25 +212,27 @@ function Transport({ player }: { player: PlayerState }) {
           </span>
         )}
       </div>
-      <IconButton
-        label={confirmStop ? "Click again to stop and disconnect" : "Stop and disconnect"}
-        tone="danger"
-        disabled={!player.voice}
-        busy={busy.stop}
-        active={confirmStop}
-        className={confirmStop ? "!bg-danger/20 !text-danger" : ""}
-        onClick={() => {
-          if (confirmStop) {
-            setConfirmStop(false);
-            controls.stop();
-          } else {
-            setConfirmStop(true);
-            setTimeout(() => setConfirmStop(false), 3000);
-          }
-        }}
-      >
-        <Square size={18} fill="currentColor" />
-      </IconButton>
+      <div className="relative">
+        {confirmStop && (
+          <span
+            role="status"
+            className="pointer-events-none absolute bottom-full right-0 mb-2 animate-pop sm:right-auto sm:left-1/2 sm:-translate-x-1/2 whitespace-nowrap rounded-full bg-danger px-3 py-1 text-xs font-semibold text-white shadow-[0_8px_24px_-6px_rgb(0_0_0/0.8)]"
+          >
+            Press again to stop
+          </span>
+        )}
+        <IconButton
+          label={confirmStop ? "Press again to stop and disconnect" : "Stop and disconnect"}
+          tone="danger"
+          disabled={!player.voice}
+          busy={busy.stop}
+          active={confirmStop}
+          className={confirmStop ? "!bg-danger/20 !text-danger ring-1 ring-danger/50" : ""}
+          onClick={pressStop}
+        >
+          <Square size={18} fill="currentColor" />
+        </IconButton>
+      </div>
     </div>
   );
 }

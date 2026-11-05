@@ -34,6 +34,7 @@ CATALOG = [
     ("Rin Takahara", "Tokyo Rain", 247), ("Marrow", "Hearts in Monochrome", 183),
     ("Polar Bloom", "Wildfire", 256), ("Saint Juno", "Gold Coast Drive", 208),
 ]
+STATIONS = ["Lofi Hours", "Night Jazz FM", "Tokyo Beats", "Ambient Drift", "Synthwave City", "Morning Acoustic"]
 LINES = [
     "Streetlights hum a song I almost know", "We keep the windows open to the night",
     "Every road out here is paved with static", "Hold on, the city's waking up again",
@@ -134,7 +135,7 @@ class DemoBackend:
             await asyncio.sleep(0.5)
             for p in self.players.values():
                 song = p.q.current
-                if song and not p.paused and p.q.position >= song.duration:
+                if song and not p.paused and not song.is_live and p.q.position >= song.duration:
                     self._advance(p)
 
     def _advance(self, p: DemoPlayer, *, skipping: bool = False):
@@ -316,8 +317,16 @@ class DemoBackend:
                 query = str(args.get("query", "")).strip().lower()
                 if not query:
                     raise PlayerError("Type something to play.")
-                matches = [i for i, (a, n, _) in enumerate(CATALOG) if query in f"{a} {n}".lower()]
-                song = _song(matches[0] if matches else random.randrange(len(CATALOG)), ("You", 5))
+                if query.startswith("radio:demo-"):
+                    i = int(query.removeprefix("radio:demo-")) % len(STATIONS)
+                    song = Song(title=STATIONS[i], query=query, url="", duration=0,
+                                stream_url=f"https://example.com/stream/{i}",
+                                thumbnail=f"https://picsum.photos/seed/radio{i}/480/480",
+                                artist="Japan · lofi, chill · 128 kbps", track_name=STATIONS[i],
+                                requester="You", requester_avatar=DEMO_USER["avatar"])
+                else:
+                    matches = [i for i, (a, n, _) in enumerate(CATALOG) if query in f"{a} {n}".lower()]
+                    song = _song(matches[0] if matches else random.randrange(len(CATALOG)), ("You", 5))
                 song.requester_id = int(DEMO_USER["id"])
                 q.add([song], top=bool(args.get("top")))
                 p.channel = p.channel or "General"
@@ -330,12 +339,11 @@ class DemoBackend:
     async def search(self, guild_id: int, query: str) -> dict:
         await asyncio.sleep(0.3)
         if query.lower().startswith("radio"):
-            names = ["Lofi Hours", "Night Jazz FM", "Tokyo Beats", "Ambient Drift", "Synthwave City", "Morning Acoustic"]
             return {"songs": [], "albums": [], "videos": [], "stations": [
                 {"uuid": f"demo-{i}", "name": n, "favicon": f"https://picsum.photos/seed/radio{i}/120/120",
                  "country": ["Japan", "France", "Canada"][i % 3], "tags": ["lofi", "chill"], "bitrate": 128,
                  "summary": f"{['Japan', 'France', 'Canada'][i % 3]} · lofi, chill · 128 kbps"}
-                for i, n in enumerate(names)]}
+                for i, n in enumerate(STATIONS)]}
         words = query.lower().split()
         hits = [i for i, (a, n, _) in enumerate(CATALOG) if any(w in f"{a} {n}".lower() for w in words)]
         hits = hits or random.sample(range(len(CATALOG)), 5)
