@@ -1,5 +1,12 @@
-discord.py[voice]>=2.7.1
+# Voice stack: pinned to a combination known to play audio. davey 0.2 changed how
+# encryption keys are switched in, which discord.py 2.7.1 doesn't support yet: every
+# track dies within a second. Upgrade these two together, and test playback on Discord.
+discord.py[voice]==2.7.1
+davey==0.1.6
+
+# Kept current on purpose: YouTube changes often and old yt-dlp versions stop working
 yt-dlp[default]>=2026.8.19
+
 spotipy>=2.25.2
 aiohttp>=3.9
 aiosqlite>=0.19.0
