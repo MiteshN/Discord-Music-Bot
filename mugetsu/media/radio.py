@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 import time
 from dataclasses import dataclass
 
@@ -15,6 +16,35 @@ log = logging.getLogger("mugetsu.radio")
 USER_AGENT = "Mugetsu/2.0 (Discord music bot; https://github.com/MiteshN/Discord-Music-Bot)"
 FALLBACK_SERVERS = ("de1.api.radio-browser.info", "de2.api.radio-browser.info", "fi1.api.radio-browser.info")
 SERVER_TTL = 6 * 3600
+ANYWHERE = {"any", "all", "world", "worldwide", "everywhere", "none", "off"}
+
+
+def parse_radio_query(query: str) -> tuple[str, str]:
+    """Split "lofi --country=japan" (or "country:japan") into ("lofi", "japan")."""
+    match = re.search(r"(?:--country=|country:)(\"[^\"]+\"|\S+)", query)
+    if not match:
+        return query.strip(), ""
+    country = match.group(1).strip('"')
+    return (query[:match.start()] + query[match.end():]).strip(), country
+
+
+def _country_filter(country: str) -> dict:
+    return {"countrycode": country.upper()} if len(country) == 2 else {"country": country}
+
+
+def _norm(name: str) -> str:
+    return " ".join(name.casefold().split())
+
+
+def _dedupe(stations: list[Station]) -> list[Station]:
+    """Drop repeats: the same result twice, or the directory listing one station twice under one name."""
+    unique, seen = [], set()
+    for s in stations:
+        key = (_norm(s.name), s.countrycode)
+        if s.uuid not in seen and key not in seen:
+            seen.update((s.uuid, key))
+            unique.append(s)
+    return unique
 
 
 @dataclass
@@ -28,6 +58,7 @@ class Station:
     codec: str
     bitrate: int
     homepage: str
+    countrycode: str = ""
 
     @classmethod
     def from_api(cls, d: dict) -> Station:
@@ -37,10 +68,11 @@ class Station:
             stream_url=d.get("url_resolved") or d.get("url") or "",
             favicon=d.get("favicon") or "",
             country=d.get("country") or d.get("countrycode") or "",
-            tags=[t.strip() for t in (d.get("tags") or "").split(",") if t.strip()][:5],
+            tags=[t.strip() for t in (d.get("tags") or "").split(",") if t.strip()],
             codec=d.get("codec") or "",
             bitrate=int(d.get("bitrate") or 0),
             homepage=d.get("homepage") or "",
+            countrycode=(d.get("countrycode") or "").upper(),
         )
 
     @property
@@ -52,12 +84,15 @@ class Station:
 
     def to_dict(self) -> dict:
         return {"uuid": self.uuid, "name": self.name, "favicon": self.favicon, "country": self.country,
-                "tags": self.tags, "bitrate": self.bitrate, "summary": self.summary}
+                "tags": self.tags[:5], "bitrate": self.bitrate, "summary": self.summary}
 
 
 class RadioBrowser:
-    def __init__(self, http_getter):
+    def __init__(self, http_getter, prefer_country: str = ""):
         self._http = http_getter  # a callable returning the shared aiohttp session
+        # Stations from here are listed first (a two-letter code like "US", or a country name)
+        prefer_country = prefer_country.strip()
+        self.prefer_country = "" if prefer_country.lower() in ANYWHERE else prefer_country
         self._servers: list[str] = []
         self._servers_at = 0.0
 
@@ -94,19 +129,58 @@ class RadioBrowser:
         raise RuntimeError(f"Radio directory unavailable: {last_error}")
 
     async def search(self, query: str = "", country: str = "", limit: int = 10) -> list[Station]:
-        """Stations by name, falling back to tag (genre) when no names match; most popular first."""
+        """Stations by name, falling back to tag (genre) when no names match; most popular first.
+
+        `country` limits the search to one country ("any" searches everywhere). Without it, stations
+        from `prefer_country` come first and the rest of the world fills in after them.
+        """
         base = {"order": "clickcount", "reverse": "true", "hidebroken": "true", "limit": str(limit)}
-        country = country.strip()
+        query, country = query.strip(), country.strip()
+        # radio-browser matches names anywhere, so "nts" also finds "Huntsville": a match at the start
+        # of a word is the one people mean
+        at_word = re.compile(rf"(?<!\w){re.escape(query)}", re.IGNORECASE) if query else None
+
+        def relevant(s: Station, kind: str = "name") -> bool:
+            if at_word is None:
+                return True
+            return any(at_word.search(t) for t in s.tags) if kind == "tag" else bool(at_word.search(s.name))
+
+        def ranked(found: tuple[list[Station], str]) -> list[Station]:
+            stations, kind = found
+            # Name matches at a word start first; popularity order holds within each group
+            return sorted(stations, key=lambda s: not relevant(s)) if kind == "name" else stations
+
+        if country.lower() in ANYWHERE or (not country and not self.prefer_country):
+            return _dedupe(ranked(await self._find(base, query)))[:limit]
         if country:
-            base["countrycode" if len(country) == 2 else "country"] = country
-        query = query.strip()
-        tries = [{"name": query}, {"tag": query.lower()}] if query else [{}]
-        for extra in tries:
-            rows = await self._get("/json/stations/search", {**base, **extra})
+            return _dedupe(ranked(await self._find({**base, **_country_filter(country)}, query)))[:limit]
+
+        local, world = await asyncio.gather(
+            # Home stations only count when they really match, so they never bury a good worldwide hit
+            self._find({**base, **_country_filter(self.prefer_country)}, query, keep=relevant),
+            self._find(base, query),
+            return_exceptions=True,
+        )
+        if isinstance(local, BaseException) and isinstance(world, BaseException):
+            raise world
+        home = [] if isinstance(local, BaseException) else local[0]
+        rest = [] if isinstance(world, BaseException) else ranked(world)
+        # A station named exactly what was asked for wins wherever it is ("BBC Radio 1")
+        wanted = _norm(query)
+        exact = [s for s in home + rest if wanted and _norm(s.name) == wanted]
+        return _dedupe(exact + home + rest)[:limit]
+
+    async def _find(self, params: dict, query: str, keep=None) -> tuple[list[Station], str]:
+        """Stations by name, else by tag, and which of the two matched. `keep(station, kind)` drops weak matches."""
+        tries = [("name", {"name": query}), ("tag", {"tag": query.lower()})] if query else [("all", {})]
+        for kind, extra in tries:
+            rows = await self._get("/json/stations/search", {**params, **extra})
             stations = [s for s in map(Station.from_api, rows) if s.stream_url]
+            if keep is not None:
+                stations = [s for s in stations if keep(s, kind)]
             if stations:
-                return stations
-        return []
+                return stations, kind
+        return [], ""
 
     async def by_uuid(self, uuid: str) -> Station | None:
         rows = await self._get(f"/json/stations/byuuid/{uuid}")

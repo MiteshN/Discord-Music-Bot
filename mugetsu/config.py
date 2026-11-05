@@ -41,6 +41,7 @@ class Config:
     idle_timeout: int = 600  # leave after 10 min with nothing playing
     alone_timeout: int = 180  # leave after 3 min with nobody listening
     resume_window: int = 900  # after a restart, pick up sessions saved this recently (0 = never)
+    radio_country: str = "US"  # radio search lists this country's stations first ("" or "any" = no preference)
 
     client_id: str = ""
     client_secret: str = ""
@@ -79,6 +80,7 @@ class Config:
             idle_timeout=_int("IDLE_TIMEOUT", 600),
             alone_timeout=_int("ALONE_TIMEOUT", 180),
             resume_window=_int("RESUME_WINDOW", 900),
+            radio_country=_str("RADIO_COUNTRY", "US"),
             client_id=_str("DISCORD_CLIENT_ID"),
             client_secret=_str("DISCORD_CLIENT_SECRET"),
             dashboard_secret=_str("DASHBOARD_SECRET_KEY"),

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from typing import Literal
 
 import aiohttp
@@ -13,6 +12,7 @@ from discord.ext import commands
 from mugetsu.cogs.common import MusicCog, require_listener, require_listener_if_connected
 from mugetsu.media import youtube
 from mugetsu.media.lyrics import split_lyrics
+from mugetsu.media.radio import parse_radio_query
 from mugetsu.player.manager import URL_RE, Requester
 from mugetsu.player.models import PlayerError
 from mugetsu.ui import embeds
@@ -25,15 +25,6 @@ log = logging.getLogger("mugetsu.cogs.playback")
 def no_peeking(player):
     if player.game is not None:
         raise PlayerError("No peeking during guess the song! 🙈")
-
-
-def parse_radio_query(query: str) -> tuple[str, str]:
-    """Split "lofi --country=japan" (or "country:japan") into ("lofi", "japan")."""
-    match = re.search(r"(?:--country=|country:)(\"[^\"]+\"|\S+)", query)
-    if not match:
-        return query.strip(), ""
-    country = match.group(1).strip('"')
-    return (query[:match.start()] + query[match.end():]).strip(), country
 
 
 class Playback(MusicCog):
@@ -241,7 +232,7 @@ class Playback(MusicCog):
         )
 
     @commands.hybrid_command(name="radio", description="Play an internet radio station (e.g. lofi, jazz, a station name)")
-    @app_commands.describe(query="Station name or genre. Add --country=japan to filter by country")
+    @app_commands.describe(query="Station name or genre. Add --country=japan for one country, or --country=any for worldwide")
     async def radio(self, ctx: commands.Context, *, query: str = ""):
         await ctx.defer()
         name, country = parse_radio_query(query)
