@@ -13,6 +13,7 @@ import functools
 import logging
 import multiprocessing
 import os
+import shutil
 import time
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -186,11 +187,32 @@ def _playlist(url: str) -> list[dict]:
 
 _pool: ProcessPoolExecutor | None = None
 
+# Background work (extraction, and the Deno processes yt-dlp starts) runs at lower CPU
+# priority, so on a busy machine the audio thread wins and playback doesn't stutter.
+BACKGROUND_NICENESS = 10
+
+
+def lower_priority():
+    """Make the calling process (and anything it starts) yield the CPU to playback."""
+    if hasattr(os, "nice"):
+        try:
+            os.nice(BACKGROUND_NICENESS)
+        except OSError:
+            pass
+
+
+def background_command(args: list[str]) -> list[str]:
+    """Prefix a command so it runs at lower CPU priority, where the OS supports it."""
+    nice = shutil.which("nice") if os.name == "posix" else None
+    return [nice, "-n", str(BACKGROUND_NICENESS), *args] if nice else args
+
 
 def _get_pool() -> ProcessPoolExecutor:
     global _pool
     if _pool is None:
-        _pool = ProcessPoolExecutor(max_workers=2, mp_context=multiprocessing.get_context("spawn"))
+        _pool = ProcessPoolExecutor(
+            max_workers=2, mp_context=multiprocessing.get_context("spawn"), initializer=lower_priority
+        )
     return _pool
 
 

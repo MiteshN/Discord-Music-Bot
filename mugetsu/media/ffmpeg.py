@@ -9,8 +9,10 @@ so discord.py's own encoder is never involved either way.
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
+import tempfile
 from dataclasses import dataclass
 
 import discord
@@ -116,29 +118,47 @@ _LOG_PREFIX = re.compile(r"^\[[^\]]*@ 0x[0-9a-f]+\]\s*")
 
 
 class StderrTail:
-    """Keeps the end of FFmpeg's error output.
+    """FFmpeg's error output, kept in a small temp file.
 
-    discord.py pipes stderr into any object that has write() but no fileno(). We need it
-    because discord.py reports an FFmpeg failure only after it has already said the track
-    ended, so e.g. an HTTP 403 otherwise just looks like a track that stopped.
+    We need it because discord.py reports an FFmpeg failure only after it has already
+    said the track ended, so e.g. an HTTP 403 otherwise just looks like a track that
+    stopped. It's a real file (it has fileno()), so FFmpeg writes to it directly: handing
+    discord.py anything else makes it start a reader thread that spins once FFmpeg exits,
+    which steals time from the audio thread in the last seconds of every song.
     """
 
     def __init__(self, limit: int = 4096):
-        self._data = bytearray()
+        # Append mode: FFmpeg shares the file offset with us, so its writes must never
+        # land wherever we last seeked to
+        self._file = tempfile.TemporaryFile(mode="a+b")
         self._limit = limit
 
+    def fileno(self) -> int:
+        return self._file.fileno()
+
     def write(self, data: bytes) -> int:
-        if data:
-            self._data += data
-            del self._data[: -self._limit]
+        self._file.write(data)
+        self._file.flush()
         return len(data)
 
     def flush(self):
         pass
 
+    def _tail(self) -> bytes:
+        try:
+            self._file.seek(0, os.SEEK_END)
+            size = self._file.tell()
+            self._file.seek(max(0, size - self._limit))
+            return self._file.read()
+        except (OSError, ValueError):  # closed
+            return b""
+
+    def close(self):
+        self._file.close()
+
     def text(self) -> str:
         """Everything kept, with stream URLs (which carry our IP address) removed."""
-        return _URL.sub("<url>", self._data.decode(errors="replace")).strip()
+        return _URL.sub("<url>", self._tail().decode(errors="replace")).strip()
 
     def reason(self) -> str:
         """The most telling line, e.g. "Server returned 403 Forbidden (access denied)"."""

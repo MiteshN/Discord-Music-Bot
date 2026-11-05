@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import logging
 
 import discord
@@ -34,6 +35,7 @@ class MugetsuBot(commands.Bot):
         self._web_task: asyncio.Task | None = None
         self._web_shutdown = asyncio.Event()
         self._closing = False
+        self._gc_frozen = False
 
     async def setup_hook(self):
         await self.players.start()
@@ -52,6 +54,13 @@ class MugetsuBot(commands.Bot):
 
     async def on_ready(self):
         log.info("Signed in as %s (ID %s), in %d servers", self.user, self.user.id, len(self.guilds))
+        if not self._gc_frozen:
+            # Everything loaded so far (caches, modules, cogs) lives for the whole run. Moving it
+            # out of the garbage collector's view makes its occasional full sweeps much shorter,
+            # and those sweeps pause the audio thread too.
+            gc.collect()
+            gc.freeze()
+            self._gc_frozen = True
 
     async def on_command_error(self, ctx: commands.Context, error: Exception):
         if isinstance(error, commands.CommandNotFound):

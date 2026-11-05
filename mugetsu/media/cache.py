@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 import aiosqlite
 
-from mugetsu.media.youtube import AUDIO_FORMAT, cli_args
+from mugetsu.media.youtube import AUDIO_FORMAT, background_command, cli_args
 
 log = logging.getLogger("mugetsu.cache")
 
@@ -147,14 +147,16 @@ class CacheManager:
             # Rough estimate: ~160kbps Opus = 20KB/s
             await self._evict_lru(duration * 20 * 1024)
 
-            # A separate yt-dlp process: never touches the bot's GIL and can be killed cleanly
-            proc = await asyncio.create_subprocess_exec(
+            # A separate, low-priority yt-dlp process: it never touches the bot's GIL, can be
+            # killed cleanly, and doesn't compete for CPU with the song that's playing
+            command = background_command([
                 sys.executable, "-m", "yt_dlp", url,
                 "-f", AUDIO_FORMAT, *cli_args(), "--no-playlist", "--no-part", "--no-mtime", "--quiet", "--no-warnings",
                 "-o", os.path.join(self.cache_dir, f"{cache_key}.%(ext)s"),
                 "--print", "after_move:filepath", "--print", "after_move:acodec", "--no-simulate",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            ])
+            proc = await asyncio.create_subprocess_exec(
+                *command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
             try:
                 stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_DOWNLOAD_TIMEOUT)
